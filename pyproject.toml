@@ -1,0 +1,23 @@
+[project]
+name = "marginalia-backend"
+version = "0.1.0"
+description = "Marginalia API: AI-powered English corrector with pedagogical feedback"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# E/F: pycodestyle + pyflakes, I: import sorting, B: bugbear, UP: pyupgrade,
+# SIM: simplifications, ASYNC: async pitfalls
+select = ["E", "F", "I", "B", "UP", "SIM", "ASYNC"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["app", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
