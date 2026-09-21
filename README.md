@@ -153,8 +153,9 @@ the app adds the `+psycopg` driver by itself.
 string when asked for `DATABASE_URL`. Before confirming, check that the plan shows **Free / $0**;
 if Render asks for a payment method, stop. The free web service sleeps after 15 minutes without
 traffic and takes about a minute to wake up (the frontend shows a banner while it does), and Render
-gives 750 free instance hours per month. To add a real LLM later, set `LLM_PROVIDER=openai_compatible`,
-`LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL` in the service's *Environment* tab.
+gives 750 free instance hours per month. The Python version is read from `.python-version`.
+Render asks for five values when the Blueprint is created (see the table); type the API key in the
+Render panel and never anywhere else.
 
 | Variable               | Value in production                                            |
 | ---------------------- | -------------------------------------------------------------- |
@@ -163,7 +164,10 @@ gives 750 free instance hours per month. To add a real LLM later, set `LLM_PROVI
 | `CORS_ORIGINS`         | `https://marginalia-english.vercel.app` (exactly the frontend) |
 | `TRUSTED_PROXY_HOPS`   | `1` (one reverse proxy in front of the API)                    |
 | `ENVIRONMENT`          | `production` (refuses the placeholder secret)                  |
-| `LLM_PROVIDER`         | `fake` until an LLM key is configured                          |
+| `LLM_PROVIDER`         | `openai_compatible` (or `fake` for the offline demo client)    |
+| `LLM_BASE_URL`         | `https://api.groq.com/openai/v1` (asked for at creation)       |
+| `LLM_API_KEY`          | your provider key (secret, asked for at creation)              |
+| `LLM_MODEL`            | `openai/gpt-oss-120b` (asked for at creation)                  |
 
 **3. Frontend.** Put the service URL (`https://<name>.onrender.com/api/v1`) in
 `src/environments/environment.production.ts` of the frontend repository and merge: Vercel redeploys.
