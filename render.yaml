@@ -1,0 +1,46 @@
+# Render Blueprint: the API as code (spec section 17.2). Free plan only: this project must cost nothing.
+# The database lives in Neon (free, permanent). Do NOT add a Render Postgres: the free one expires
+# after 30 days and is then deleted.
+services:
+  - type: web
+    name: marginalia-api
+    runtime: python
+    plan: free
+    region: frankfurt # same region as the Neon project
+    # The Python version comes from .python-version (Render's default for new services is 3.14).
+    buildCommand: pip install -r requirements.txt
+    # Migrations run on every deploy, then the API starts.
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/v1/health
+    autoDeployTrigger: checksPass # deploy only after the GitHub Actions CI passes
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      # Asked for once when the Blueprint is created: the Neon connection string.
+      - key: DATABASE_URL
+        sync: false
+      # Render generates a random 256-bit value; it never appears in the repository.
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "60"
+      # The exact address of the frontend. A different one makes the browser block every API call.
+      - key: CORS_ORIGINS
+        value: https://marginalia-english.vercel.app
+      # Render puts one reverse proxy in front of the API: see the rate-limiting notes in the README.
+      - key: TRUSTED_PROXY_HOPS
+        value: "1"
+      # The LLM (a free provider, see the README). Render asks for these four when the Blueprint is
+      # created; they are not fixed here, so a later Blueprint sync never overwrites them.
+      #   LLM_PROVIDER=openai_compatible  (or `fake` for the offline demo client)
+      #   LLM_BASE_URL=https://api.groq.com/openai/v1
+      #   LLM_API_KEY=<your key>          (secret: type it in the Render panel, never in Git)
+      #   LLM_MODEL=openai/gpt-oss-120b   (list a key's models with GET <LLM_BASE_URL>/models)
+      - key: LLM_PROVIDER
+        sync: false
+      - key: LLM_BASE_URL
+        sync: false
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_MODEL
+        sync: false

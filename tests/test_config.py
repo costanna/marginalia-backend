@@ -37,3 +37,19 @@ def test_defaults() -> None:
 
     assert settings.access_token_expire_minutes == 60
     assert settings.cors_origins == ["http://localhost:4200"]
+
+
+@pytest.mark.parametrize(
+    ("given", "expected"),
+    [
+        # exactly as Neon shows it, with its query parameters
+        (
+            "postgresql://u:p@ep-x.eu-central-1.aws.neon.tech/neondb?sslmode=require",
+            "postgresql+psycopg://u:p@ep-x.eu-central-1.aws.neon.tech/neondb?sslmode=require",
+        ),
+        ("postgres://u:p@host/db", "postgresql+psycopg://u:p@host/db"),  # older scheme name
+        ("postgresql+psycopg://u:p@host/db", "postgresql+psycopg://u:p@host/db"),  # already right
+    ],
+)
+def test_database_url_gets_the_psycopg_driver_when_it_is_missing(given: str, expected: str) -> None:
+    assert make_settings(database_url=given).database_url == expected

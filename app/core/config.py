@@ -41,6 +41,20 @@ class Settings(BaseSettings):
     # Needed to see the visitor's IP instead of the proxy's (see app/core/rate_limit.py).
     trusted_proxy_hops: int = Field(default=0, ge=0)
 
+    @field_validator("database_url")
+    @classmethod
+    def name_the_psycopg_driver(cls, value: str) -> str:
+        """Accept the URL exactly as the host hands it out.
+
+        Neon and most hosts give `postgresql://...` (or the older `postgres://...`), but SQLAlchemy
+        must be told to use the psycopg 3 driver. Converting here removes a classic deployment
+        mistake: pasting the connection string as-is and getting "No module named psycopg2".
+        """
+        for prefix in ("postgres://", "postgresql://"):
+            if value.startswith(prefix):
+                return "postgresql+psycopg://" + value[len(prefix) :]
+        return value
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def split_origins(cls, value: object) -> object:
