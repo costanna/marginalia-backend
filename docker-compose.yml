@@ -1,5 +1,5 @@
-# Local development services. Phase 0: PostgreSQL only.
-# The API service is added in Phase 1, once the app and its Dockerfile exist.
+# Local development: `docker compose up` starts PostgreSQL and the API.
+# `docker compose up -d db` starts only the database (e.g. to run the API or tests from your venv).
 services:
   db:
     image: postgres:17-alpine
@@ -9,7 +9,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-marginalia}
       POSTGRES_DB: ${POSTGRES_DB:-marginalia}
     ports:
-      - "5432:5432"
+      # Host port is configurable: a PostgreSQL installed on the host may already use 5432.
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -17,6 +18,20 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  api:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Inside the compose network the database is reachable as `db` on its internal port.
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-marginalia}:${POSTGRES_PASSWORD:-marginalia}@db:5432/${POSTGRES_DB:-marginalia}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
 
 volumes:
   postgres_data:
