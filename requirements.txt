@@ -1,0 +1,4 @@
+# Runtime dependencies.
+# Phase 0 has no runtime code yet; FastAPI, SQLAlchemy, Alembic, psycopg,
+# argon2-cffi, PyJWT, slowapi and httpx are added in Phase 1 together with
+# the code that uses them, so every dependency has a reason to exist.
