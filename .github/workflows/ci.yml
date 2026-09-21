@@ -49,8 +49,8 @@ jobs:
       - name: Type check (mypy)
         run: mypy
 
-      - name: Tests (pytest)
-        run: pytest
+      - name: Tests (pytest, services coverage at least 80%)
+        run: pytest --cov=app.services --cov-fail-under=80
 
   docker-build:
     runs-on: ubuntu-latest
