@@ -1,4 +1,11 @@
-# Runtime dependencies.
-# Phase 0 has no runtime code yet; FastAPI, SQLAlchemy, Alembic, psycopg,
-# argon2-cffi, PyJWT, slowapi and httpx are added in Phase 1 together with
-# the code that uses them, so every dependency has a reason to exist.
+# Runtime dependencies. Compatible-release pins (~=) allow patch updates only.
+fastapi~=0.141.1
+uvicorn~=0.53.0
+sqlalchemy~=2.0.54
+alembic~=1.20.0
+psycopg[binary]~=3.3.6
+pydantic-settings~=2.15.0
+email-validator~=2.3.0
+argon2-cffi~=25.1.0
+PyJWT~=2.14.0
+# Added in later phases: slowapi (rate limiting), anthropic SDK (LLM client)

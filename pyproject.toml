@@ -7,11 +7,17 @@ requires-python = ">=3.12"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Alembic generates these files; they are reviewed by hand but not restyled.
+extend-exclude = ["alembic/versions"]
 
 [tool.ruff.lint]
 # E/F: pycodestyle + pyflakes, I: import sorting, B: bugbear, UP: pyupgrade,
 # SIM: simplifications, ASYNC: async pitfalls
 select = ["E", "F", "I", "B", "UP", "SIM", "ASYNC"]
+
+[tool.ruff.lint.isort]
+# The local ./alembic folder (migrations) would otherwise be mistaken for the alembic package.
+known-third-party = ["alembic"]
 
 [tool.mypy]
 python_version = "3.12"
