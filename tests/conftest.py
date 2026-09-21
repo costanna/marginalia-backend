@@ -51,6 +51,7 @@ TEST_DATABASE_URL = _dev_url.set(database=_test_db_name).render_as_string(hide_p
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 get_settings.cache_clear()
 
+from app.core.rate_limit import limiter  # noqa: E402
 from app.db.session import get_session  # noqa: E402
 from app.main import app  # noqa: E402
 from app.services.llm import get_llm_client  # noqa: E402
@@ -84,6 +85,12 @@ def migrated_database() -> Iterator[None]:
     command.downgrade(config, "base")
     command.upgrade(config, "head")
     yield
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limits() -> None:
+    """Counters live in memory and would otherwise leak from one test into the next."""
+    limiter.reset()
 
 
 @pytest.fixture

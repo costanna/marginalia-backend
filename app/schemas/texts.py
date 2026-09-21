@@ -76,3 +76,22 @@ class TextPage(BaseModel):
     page: int
     page_size: int
     total: int
+
+
+class DemoAnalyzeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: Annotated[str, Field(max_length=MAX_REQUEST_TEXT_CHARS)]
+    ui_language: UiLanguage = UiLanguage.ES
+
+
+class DemoAnalysisResponse(BaseModel):
+    """Like TextRead, but nothing was saved: no id, no date, and corrections have no id."""
+
+    original_text: str
+    corrected_text: str
+    cefr_level: CefrLevel
+    word_count: int
+    summary: str
+    ui_language: UiLanguage
+    corrections: list[CorrectionBase]

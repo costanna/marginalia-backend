@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 
@@ -70,7 +71,21 @@ async def _handle_http_exception(_: Request, exc: Exception) -> JSONResponse:
     return _error_response(exc.status_code, code, str(exc.detail), headers=exc.headers)
 
 
+async def _handle_rate_limit(_: Request, exc: Exception) -> JSONResponse:
+    assert isinstance(exc, RateLimitExceeded) and exc.limit is not None
+    item = exc.limit.limit
+    period = item.GRANULARITY.name
+    # A per-day limit is a quota the user can act on ("sign up for more"); anything shorter
+    # is plain abuse protection ("slow down").
+    code = "daily_quota_exceeded" if period == "day" else "rate_limit_exceeded"
+    return _error_response(
+        429, code, "Too many requests.", {"limit": item.amount, "period": period}
+    )
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(AppError, _handle_app_error)
+    # RateLimitExceeded is an HTTPException subclass: its own handler must be registered too.
+    app.add_exception_handler(RateLimitExceeded, _handle_rate_limit)
     app.add_exception_handler(RequestValidationError, _handle_validation_error)
     app.add_exception_handler(StarletteHTTPException, _handle_http_exception)
