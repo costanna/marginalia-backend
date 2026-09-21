@@ -37,6 +37,7 @@ os.environ["ENVIRONMENT"] = "test"
 # Pin everything a developer's .env could change, so tests are reproducible and can NEVER reach
 # the real LLM (or spend money) even if a real key is configured locally.
 os.environ["LLM_PROVIDER"] = "fake"
+os.environ["LLM_BASE_URL"] = ""
 os.environ["LLM_API_KEY"] = ""
 os.environ["LLM_MODEL"] = ""
 os.environ["MAX_TEXT_CHARS"] = "3000"

@@ -21,8 +21,12 @@ class Settings(BaseSettings):
     cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:4200"]
 
     # --- LLM ---
-    # "fake" is a deterministic offline client (development and tests); "anthropic" is the real API.
-    llm_provider: Literal["fake", "anthropic"] = "fake"
+    # fake: deterministic offline client (development, tests; costs nothing).
+    # openai_compatible: any provider speaking the OpenAI chat protocol, including free tiers
+    #   (Groq, Gemini, OpenRouter, ...); needs LLM_BASE_URL, LLM_API_KEY and LLM_MODEL.
+    # anthropic: the Anthropic API (paid; optional).
+    llm_provider: Literal["fake", "openai_compatible", "anthropic"] = "fake"
+    llm_base_url: str = ""
     llm_api_key: str = ""
     llm_model: str = ""
     llm_timeout_seconds: float = Field(default=30, gt=0)
@@ -53,9 +57,18 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def require_credentials_for_the_real_llm(self) -> "Settings":
-        if self.llm_provider == "anthropic" and not (self.llm_api_key and self.llm_model):
-            raise ValueError("LLM_API_KEY and LLM_MODEL are required when LLM_PROVIDER=anthropic")
+    def require_credentials_for_a_real_llm(self) -> "Settings":
+        required = {
+            "anthropic": {"LLM_API_KEY": self.llm_api_key, "LLM_MODEL": self.llm_model},
+            "openai_compatible": {
+                "LLM_BASE_URL": self.llm_base_url,
+                "LLM_API_KEY": self.llm_api_key,
+                "LLM_MODEL": self.llm_model,
+            },
+        }.get(self.llm_provider, {})
+        missing = [name for name, value in required.items() if not value]
+        if missing:
+            raise ValueError(f"{', '.join(missing)} required when LLM_PROVIDER={self.llm_provider}")
         return self
 
 

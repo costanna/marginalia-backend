@@ -137,3 +137,4 @@ async def test_the_learner_text_is_never_logged(caplog: pytest.LogCaptureFixture
         await call(make_client(StubMessages(error=error)), "my very private diary entry")
 
     assert "private diary" not in caplog.text
+    assert caplog.records  # the failure WAS logged: the assertion above is not vacuous

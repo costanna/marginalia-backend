@@ -12,7 +12,7 @@ Frontend: [marginalia-frontend](https://github.com/costanna/marginalia-frontend)
 ## Stack
 
 Python 3.12 · FastAPI · Pydantic v2 · SQLAlchemy 2 (async) · Alembic · PostgreSQL (Neon) ·
-Argon2id + JWT · Anthropic API behind an `LLMClient` interface (Phase 2) · pytest · ruff · mypy
+Argon2id + JWT · Pluggable LLM behind an `LLMClient` interface (free tiers supported) · pytest · ruff · mypy
 
 ## Run locally
 
@@ -59,19 +59,33 @@ emoji is one code point but two UTF-16 units).
 Errors always look like `{"error": {"code": "...", "message": "...", "details": {}}}`; the frontend
 translates `code`, the backend never translates messages.
 
-## LLM provider
+## LLM provider: zero-cost by design
 
-`LLM_PROVIDER=fake` (default) uses a deterministic offline client: no key, no cost, used by the tests.
-To analyse with Claude, set in `.env` (never commit it):
+This is a portfolio project, so it is built to run **without spending money**. The AI provider is
+swappable by configuration (`LLM_PROVIDER`), and none of the options needs a paid plan:
+
+| `LLM_PROVIDER`      | Cost               | Use                                                               |
+| ------------------- | ------------------ | ----------------------------------------------------------------- |
+| `fake` (default)    | Free, offline      | Development and tests. Only recognises a few common mistakes.     |
+| `openai_compatible` | Free tiers exist   | Real corrections through Groq, Gemini, OpenRouter... (see below). |
+| `anthropic`         | Paid, **optional** | Anthropic API. Not needed for anything in this project.           |
+
+To get real corrections for free, create an API key on a provider with a free tier and set, in `.env`
+(never commit it):
 
 ```
-LLM_PROVIDER=anthropic
-LLM_API_KEY=<your key>
-LLM_MODEL=claude-haiku-4-5     # a fast, cheap model is enough to start
+LLM_PROVIDER=openai_compatible
+LLM_BASE_URL=https://api.groq.com/openai/v1
+LLM_API_KEY=<your free key>
+LLM_MODEL=llama-3.3-70b-versatile
 ```
 
-The model is asked for structured JSON output (a JSON Schema); the answer is validated with Pydantic,
-retried once if unusable, and its corrections are located in the text by the server.
+Provider URLs, model names and free-tier limits change: check the provider's docs. If a free tier
+runs out (HTTP 429) the API retries with growing waits and then answers `503 llm_unavailable`, which
+the frontend shows as a friendly message; nothing is charged to the user's daily allowance.
+
+The model is asked for JSON; the answer is validated with Pydantic, retried once if unusable, and its
+corrections are located in the text by the server, so a weaker free model cannot break the offsets.
 
 ## Quality checks
 

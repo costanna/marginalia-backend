@@ -32,6 +32,17 @@ TARGET_LEVEL_HINT = (
     "\n\nThe learner is aiming for level {level}: prefer feedback that helps them reach it."
 )
 
+# Used with providers that only offer "JSON mode" (any valid JSON) instead of schema-constrained
+# output: the expected shape is described in the prompt and checked by our own validation.
+JSON_SHAPE_HINT = (
+    "\n\nReply with ONE JSON object and nothing else (no markdown, no comments), "
+    "shaped exactly like:\n"
+    '{"cefr_level": "B1", "summary": "...", "corrections": ['
+    '{"original": "...", "suggestion": "...", "category": "grammar", '
+    '"rule_tag": "verb_tense", "explanation": "..."}]}\n'
+    'If there is nothing to correct, use an empty "corrections" list.'
+)
+
 # Matches a closing </user_text> tag however it is spelled (case, inner spaces).
 _CLOSING_TAG = re.compile(r"<\s*/\s*user_text\s*>", re.IGNORECASE)
 
