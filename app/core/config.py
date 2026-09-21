@@ -20,6 +20,20 @@ class Settings(BaseSettings):
     # NoDecode: read the raw string ("a,b") instead of expecting JSON, then split it below.
     cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:4200"]
 
+    # --- LLM ---
+    # "fake" is a deterministic offline client (development and tests); "anthropic" is the real API.
+    llm_provider: Literal["fake", "anthropic"] = "fake"
+    llm_api_key: str = ""
+    llm_model: str = ""
+    llm_timeout_seconds: float = Field(default=30, gt=0)
+    # Upper bound for one analysis response; keeps a runaway generation from costing too much.
+    llm_max_tokens: int = Field(default=4096, gt=0)
+
+    # --- Limits ---
+    max_text_chars: int = Field(default=3000, gt=0)
+    daily_analysis_limit: int = Field(default=10, gt=0)
+    demo_daily_limit: int = Field(default=3, gt=0)
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def split_origins(cls, value: object) -> object:
@@ -33,6 +47,12 @@ class Settings(BaseSettings):
             PLACEHOLDER_SECRET_PREFIX
         ):
             raise ValueError("SECRET_KEY must be replaced with a random value in production")
+        return self
+
+    @model_validator(mode="after")
+    def require_credentials_for_the_real_llm(self) -> "Settings":
+        if self.llm_provider == "anthropic" and not (self.llm_api_key and self.llm_model):
+            raise ValueError("LLM_API_KEY and LLM_MODEL are required when LLM_PROVIDER=anthropic")
         return self
 
 

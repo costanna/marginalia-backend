@@ -8,4 +8,5 @@ pydantic-settings~=2.15.0
 email-validator~=2.3.0
 argon2-cffi~=25.1.0
 PyJWT~=2.14.0
-# Added in later phases: slowapi (rate limiting), anthropic SDK (LLM client)
+anthropic~=1.7.0
+# Added in a later step of this phase: slowapi (rate limiting)
