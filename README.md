@@ -77,10 +77,18 @@ To get real corrections for free, create an API key on a provider with a free ti
 LLM_PROVIDER=openai_compatible
 LLM_BASE_URL=https://api.groq.com/openai/v1
 LLM_API_KEY=<your free key>
-LLM_MODEL=llama-3.3-70b-versatile
+LLM_MODEL=openai/gpt-oss-120b
 ```
 
-Provider URLs, model names and free-tier limits change: check the provider's docs. If a free tier
+Provider URLs, model names and free-tier limits change: check the provider's docs. **Model names
+go out of date fast** (a `llama-3.3-70b-versatile` example stopped working on Groq while this was
+being written): list what your key can actually use with
+`curl -H "Authorization: Bearer $LLM_API_KEY" $LLM_BASE_URL/models`.
+
+Verified on 2026-09-21 with Groq and `openai/gpt-oss-120b` on a free account: real corrections in
+Spanish, Catalan and English in 1.5 to 3 seconds, correct offsets, and a prompt-injection attempt
+inside the text was ignored. Groq reported 1000 requests per day and 8000 tokens per minute for that
+model, which is roughly 4 to 6 analyses per minute: plenty for a portfolio. If a free tier
 runs out (HTTP 429) the API retries with growing waits and then answers `503 llm_unavailable`, which
 the frontend shows as a friendly message; nothing is charged to the user's daily allowance.
 
