@@ -27,9 +27,11 @@ services:
       # The exact address of the frontend. A different one makes the browser block every API call.
       - key: CORS_ORIGINS
         value: https://marginalia-english.vercel.app
-      # Render puts one reverse proxy in front of the API: see the rate-limiting notes in the README.
+      # Three hops append to X-Forwarded-For on Render (measured with the diagnostics endpoint):
+      # visitor, Cloudflare edge, Render internal balancer. The visitor is the 3rd from the END.
+      # See the rate-limiting notes in the README.
       - key: TRUSTED_PROXY_HOPS
-        value: "1"
+        value: "3"
       # The LLM (a free provider, see the README). Render asks for these four when the Blueprint is
       # created; they are not fixed here, so a later Blueprint sync never overwrites them.
       #   LLM_PROVIDER=openai_compatible  (or `fake` for the offline demo client)
