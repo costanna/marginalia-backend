@@ -5,7 +5,7 @@
 REST API for **Marginalia**, an AI-powered English corrector that annotates a learner's text like a
 teacher's margin notes, estimates the CEFR level and builds personalised exercises.
 
-> Status: **Phase 2 (LLM text analysis)** done. Exercises (Phase 6) and statistics (Phase 7) are next.
+> Status: **Phase 5 (history, export)** done. Exercises (Phase 6) and statistics (Phase 7) are next.
 
 Frontend: [marginalia-frontend](https://github.com/costanna/marginalia-frontend)
 
@@ -45,10 +45,11 @@ alembic upgrade head                     # apply migrations
 | POST   | `/api/v1/auth/login`      | No   | Return an access token                             |
 | GET    | `/api/v1/me`              | Yes  | Current profile                                    |
 | PATCH  | `/api/v1/me`              | Yes  | Update name, UI language, theme, target level      |
+| GET    | `/api/v1/me/export`       | Yes  | All your data as a JSON download (5 per minute)    |
 | DELETE | `/api/v1/me`              | Yes  | Delete the account and all its data                |
 | POST   | `/api/v1/demo/analyze`    | No   | Try the corrector, nothing saved (limited per IP)  |
 | POST   | `/api/v1/texts/analyze`   | Yes  | Analyse a text, save it, return the corrections    |
-| GET    | `/api/v1/texts`           | Yes  | Paginated history (`?page=&page_size=`)            |
+| GET    | `/api/v1/texts`           | Yes  | History (`?page=&page_size=&level=B1`)             |
 | GET    | `/api/v1/texts/{id}`      | Yes  | One text with its corrections                      |
 | DELETE | `/api/v1/texts/{id}`      | Yes  | Delete a text                                      |
 

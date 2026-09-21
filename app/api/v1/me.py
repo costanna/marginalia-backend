@@ -1,10 +1,20 @@
-from fastapi import APIRouter, Response, status
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, Request, Response, status
+from sqlalchemy import select
 
 from app.api.v1.deps import CurrentUser, SessionDep
-from app.db.models import User
+from app.core.rate_limit import limiter
+from app.db.models import AnalyzedText, UsageCounter, User
+from app.schemas.export import DataExport, UsageDayRead
+from app.schemas.texts import TextRead
 from app.schemas.user import UserRead, UserUpdate
+from app.services.usage import today
 
 router = APIRouter(prefix="/me", tags=["me"])
+
+# Reads everything the user ever wrote, so it is limited much harder than a normal request.
+EXPORT_RATE_LIMIT = "5/minute"
 
 
 @router.get("", response_model=UserRead)
@@ -23,6 +33,31 @@ async def update_me(payload: UserUpdate, user: CurrentUser, session: SessionDep)
             setattr(user, field, value)
     await session.commit()
     return user
+
+
+@router.get("/export", response_model=DataExport)
+@limiter.limit(EXPORT_RATE_LIMIT)
+async def export_my_data(
+    request: Request, response: Response, user: CurrentUser, session: SessionDep
+) -> DataExport:
+    """All of the user's data as one JSON document, offered as a file download."""
+    texts = await session.scalars(
+        select(AnalyzedText)
+        .where(AnalyzedText.user_id == user.id)
+        .order_by(AnalyzedText.created_at.desc(), AnalyzedText.id.desc())
+    )
+    usage = await session.scalars(
+        select(UsageCounter).where(UsageCounter.user_id == user.id).order_by(UsageCounter.day)
+    )
+    response.headers["Content-Disposition"] = (
+        f'attachment; filename="marginalia-export-{today().isoformat()}.json"'
+    )
+    return DataExport(
+        exported_at=datetime.now(UTC),
+        profile=UserRead.model_validate(user),
+        texts=[TextRead.model_validate(text) for text in texts],
+        usage=[UsageDayRead.model_validate(row) for row in usage],
+    )
 
 
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
