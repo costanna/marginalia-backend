@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     # Number of reverse proxies in front of the API that append to X-Forwarded-For (0 = none).
     # Needed to see the visitor's IP instead of the proxy's (see app/core/rate_limit.py).
     trusted_proxy_hops: int = Field(default=0, ge=0)
+    # Turns on GET /api/v1/diagnostics/client-ip (off by default). Meant to be enabled for a few
+    # minutes after a deployment to see which headers the host's proxies really send.
+    enable_diagnostics: bool = False
 
     @field_validator("database_url")
     @classmethod

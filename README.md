@@ -177,10 +177,17 @@ Render panel and never anywhere else.
 1. `GET /api/v1/health` answers `{"status":"ok"}`.
 2. Sign up and log in from the deployed frontend, and reload a deep route such as `/write`.
 3. No CORS errors in the browser console.
-4. **Rate limiting sees real visitors.** Call `POST /api/v1/demo/analyze` 4 times from your computer:
-   the 4th must answer `429 daily_quota_exceeded`. Then try once from your phone on mobile data: it
-   must still work. If the phone is blocked too, every visitor looks like the same address and
-   `TRUSTED_PROXY_HOPS` is wrong for this host.
+4. **Rate limiting sees real visitors.** Getting `TRUSTED_PROXY_HOPS` wrong is silent: the limits
+   simply stop working (or every visitor shares one bucket). Do not guess it, look at what the host
+   sends. Add the variable `ENABLE_DIAGNOSTICS=true` in the Render *Environment* tab, then call
+   `GET /api/v1/diagnostics/client-ip` from your computer and from your phone on mobile data, once
+   with no extra header and once with `X-Forwarded-For: 1.2.3.4`. The answer shows the headers the
+   API received and `rate_limit_key`, the address it would use:
+   - the key must be **your real public address** (compare with what a "what is my IP" site says),
+   - it must **differ** between computer and phone,
+   - and it must **not change** when you add the forged `X-Forwarded-For`.
+   If not, change `TRUSTED_PROXY_HOPS` (the entry counted from the END of `X-Forwarded-For`) and call
+   again. When it is right, **delete `ENABLE_DIAGNOSTICS`**: the endpoint is only for this check.
 
 **Keeping it awake (optional).** An external ping to `/api/v1/health` every few minutes (UptimeRobot,
 cron-job.org) avoids the one-minute wake-up. One service running all month uses about 744 of the
