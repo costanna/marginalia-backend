@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 
 from app.api.v1.deps import CurrentUser, LLMClientDep, SessionDep, SettingsDep
 from app.core.errors import AppError
-from app.db.models import AnalyzedText, Correction
+from app.db.models import AnalyzedText, CefrLevel, Correction
 from app.schemas.texts import AnalyzeRequest, TextPage, TextRead, TextSummary
 from app.services.analysis import analyze_and_save
 
@@ -59,11 +59,14 @@ async def list_texts(
     session: SessionDep,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
+    level: CefrLevel | None = None,
 ) -> TextPage:
-    """The user's history, newest first."""
-    total = await session.scalar(
-        select(func.count()).select_from(AnalyzedText).where(AnalyzedText.user_id == user.id)
-    )
+    """The user's history, newest first, optionally only the texts of one estimated level."""
+    conditions = [AnalyzedText.user_id == user.id]
+    if level is not None:
+        conditions.append(AnalyzedText.cefr_level == level)
+    # The total follows the filter, so the pager on the client always matches the list.
+    total = await session.scalar(select(func.count()).select_from(AnalyzedText).where(*conditions))
     # Only the columns the list needs: selecting the entity would also load every correction.
     rows = await session.execute(
         select(
@@ -75,7 +78,7 @@ async def list_texts(
             func.count(Correction.id).label("corrections_count"),
         )
         .outerjoin(Correction, Correction.text_id == AnalyzedText.id)
-        .where(AnalyzedText.user_id == user.id)
+        .where(*conditions)
         .group_by(AnalyzedText.id)
         # id as tie-breaker keeps the order (and therefore the pages) stable.
         .order_by(AnalyzedText.created_at.desc(), AnalyzedText.id.desc())

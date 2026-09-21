@@ -219,6 +219,47 @@ async def test_history_pagination(client: AsyncClient) -> None:
     assert all(p["total"] == 5 and p["page_size"] == 2 for p in pages)
 
 
+A2_TEXT = " ".join(
+    ["Yesterday I go to the cinema with my friends and we eat pizza"] * 2
+)  # 24 words
+
+
+async def test_history_can_be_filtered_by_level(client: AsyncClient) -> None:
+    headers = await register(client)
+    a1 = await analyze(client, headers, title="short")  # 9 words -> A1
+    a2 = await analyze(client, headers, title="longer", text=A2_TEXT)  # 24 words -> A2
+    assert (a1["cefr_level"], a2["cefr_level"]) == ("A1", "A2")
+
+    only_a2 = (await client.get(f"{TEXTS}?level=A2", headers=headers)).json()
+    only_a1 = (await client.get(f"{TEXTS}?level=A1", headers=headers)).json()
+    nothing = (await client.get(f"{TEXTS}?level=C2", headers=headers)).json()
+
+    assert [i["id"] for i in only_a2["items"]] == [a2["id"]]
+    assert only_a2["total"] == 1  # the total follows the filter, so the pager stays correct
+    assert [i["id"] for i in only_a1["items"]] == [a1["id"]]
+    assert nothing["items"] == [] and nothing["total"] == 0
+    assert (await client.get(TEXTS, headers=headers)).json()["total"] == 2  # no filter: all
+
+
+async def test_the_level_filter_never_reaches_other_users_texts(client: AsyncClient) -> None:
+    ana = await register(client, "ana@example.com")
+    ben = await register(client, "ben@example.com")
+    await analyze(client, ana)
+
+    listing = (await client.get(f"{TEXTS}?level=A1", headers=ben)).json()
+
+    assert listing["items"] == [] and listing["total"] == 0
+
+
+async def test_the_level_filter_rejects_unknown_levels(client: AsyncClient) -> None:
+    headers = await register(client)
+
+    for query in ("level=Z9", "level=b1", "level="):
+        response = await client.get(f"{TEXTS}?{query}", headers=headers)
+        assert response.status_code == 422, query
+        assert response.json()["error"]["code"] == "validation_error"
+
+
 @pytest.mark.parametrize("query", ["page=0", "page=-1", "page_size=0", "page_size=51", "page=x"])
 async def test_history_rejects_bad_pagination(client: AsyncClient, query: str) -> None:
     headers = await register(client)
