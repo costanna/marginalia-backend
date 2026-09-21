@@ -20,6 +20,27 @@ class Settings(BaseSettings):
     # NoDecode: read the raw string ("a,b") instead of expecting JSON, then split it below.
     cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:4200"]
 
+    # --- LLM ---
+    # fake: deterministic offline client (development, tests; costs nothing).
+    # openai_compatible: any provider speaking the OpenAI chat protocol, including free tiers
+    #   (Groq, Gemini, OpenRouter, ...); needs LLM_BASE_URL, LLM_API_KEY and LLM_MODEL.
+    # anthropic: the Anthropic API (paid; optional).
+    llm_provider: Literal["fake", "openai_compatible", "anthropic"] = "fake"
+    llm_base_url: str = ""
+    llm_api_key: str = ""
+    llm_model: str = ""
+    llm_timeout_seconds: float = Field(default=30, gt=0)
+    # Upper bound for one analysis response; keeps a runaway generation from costing too much.
+    llm_max_tokens: int = Field(default=4096, gt=0)
+
+    # --- Limits ---
+    max_text_chars: int = Field(default=3000, gt=0)
+    daily_analysis_limit: int = Field(default=10, gt=0)
+    demo_daily_limit: int = Field(default=3, gt=0)
+    # Number of reverse proxies in front of the API that append to X-Forwarded-For (0 = none).
+    # Needed to see the visitor's IP instead of the proxy's (see app/core/rate_limit.py).
+    trusted_proxy_hops: int = Field(default=0, ge=0)
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def split_origins(cls, value: object) -> object:
@@ -33,6 +54,21 @@ class Settings(BaseSettings):
             PLACEHOLDER_SECRET_PREFIX
         ):
             raise ValueError("SECRET_KEY must be replaced with a random value in production")
+        return self
+
+    @model_validator(mode="after")
+    def require_credentials_for_a_real_llm(self) -> "Settings":
+        required = {
+            "anthropic": {"LLM_API_KEY": self.llm_api_key, "LLM_MODEL": self.llm_model},
+            "openai_compatible": {
+                "LLM_BASE_URL": self.llm_base_url,
+                "LLM_API_KEY": self.llm_api_key,
+                "LLM_MODEL": self.llm_model,
+            },
+        }.get(self.llm_provider, {})
+        missing = [name for name, value in required.items() if not value]
+        if missing:
+            raise ValueError(f"{', '.join(missing)} required when LLM_PROVIDER={self.llm_provider}")
         return self
 
 

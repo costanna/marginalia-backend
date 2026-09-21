@@ -17,7 +17,9 @@ if sys.platform == "win32":
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers=False: by default fileConfig silences every logger that already
+    # exists (the application's own included), which is wrong when Alembic runs in-process.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # The URL comes from the environment (never from alembic.ini). "%" is escaped because
 # ConfigParser treats it as interpolation syntax and passwords may contain it.

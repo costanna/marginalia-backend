@@ -4,16 +4,21 @@ from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings, get_settings
 from app.core.errors import AppError
 from app.core.security import InvalidTokenError, decode_access_token
 from app.db.models import User
 from app.db.session import get_session
+from app.services.llm import get_llm_client
+from app.services.llm.base import LLMClient
 
 # auto_error=False: a missing header would otherwise produce FastAPI's own 403 body;
 # we raise our AppError so every 401 has the same shape.
 _bearer = HTTPBearer(auto_error=False)
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+SettingsDep = Annotated[Settings, Depends(get_settings)]
+LLMClientDep = Annotated[LLMClient, Depends(get_llm_client)]
 
 
 def _unauthorized() -> AppError:

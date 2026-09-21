@@ -34,6 +34,15 @@ if sys.platform == "win32":
 # why the app imports below carry `noqa: E402`.
 os.environ.setdefault("SECRET_KEY", "test-secret-key-that-is-long-enough-for-hs256-signing")
 os.environ["ENVIRONMENT"] = "test"
+# Pin everything a developer's .env could change, so tests are reproducible and can NEVER reach
+# the real LLM (or spend money) even if a real key is configured locally.
+os.environ["LLM_PROVIDER"] = "fake"
+os.environ["LLM_BASE_URL"] = ""
+os.environ["LLM_API_KEY"] = ""
+os.environ["LLM_MODEL"] = ""
+os.environ["MAX_TEXT_CHARS"] = "3000"
+os.environ["DAILY_ANALYSIS_LIMIT"] = "10"
+os.environ["DEMO_DAILY_LIMIT"] = "2"
 
 from app.core.config import get_settings  # noqa: E402
 
@@ -43,8 +52,11 @@ TEST_DATABASE_URL = _dev_url.set(database=_test_db_name).render_as_string(hide_p
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 get_settings.cache_clear()
 
+from app.core.rate_limit import limiter  # noqa: E402
 from app.db.session import get_session  # noqa: E402
 from app.main import app  # noqa: E402
+from app.services.llm import get_llm_client  # noqa: E402
+from app.services.llm.fake_client import FakeLLMClient  # noqa: E402
 
 ALEMBIC_INI = Path(__file__).resolve().parent.parent / "alembic.ini"
 
@@ -76,6 +88,12 @@ def migrated_database() -> Iterator[None]:
     yield
 
 
+@pytest.fixture(autouse=True)
+def reset_rate_limits() -> None:
+    """Counters live in memory and would otherwise leak from one test into the next."""
+    limiter.reset()
+
+
 @pytest.fixture
 async def engine() -> AsyncIterator[AsyncEngine]:
     # NullPool: every test gets fresh connections bound to its own event loop.
@@ -97,6 +115,7 @@ async def client(engine: AsyncEngine) -> AsyncIterator[AsyncClient]:
             yield session
 
     app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_llm_client] = FakeLLMClient  # tests may override it again
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
         yield http
     app.dependency_overrides.clear()

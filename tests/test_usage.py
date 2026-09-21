@@ -1,0 +1,120 @@
+import asyncio
+import uuid
+from collections.abc import AsyncIterator
+from datetime import date
+
+import pytest
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+
+from app.core.errors import AppError
+from app.db.models import UsageCounter, User
+from app.services import usage
+from app.services.usage import refund_analysis, reserve_analysis
+
+
+@pytest.fixture
+async def session(engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
+    async with async_sessionmaker(engine, expire_on_commit=False)() as db_session:
+        yield db_session
+
+
+async def make_user(session: AsyncSession, email: str = "ana@example.com") -> uuid.UUID:
+    user = User(email=email, password_hash="x", display_name="Ana")
+    session.add(user)
+    await session.commit()
+    return user.id
+
+
+async def counter(session: AsyncSession, user_id: uuid.UUID) -> int:
+    value = await session.scalar(
+        select(UsageCounter.analyses_count).where(UsageCounter.user_id == user_id)
+    )
+    return value or 0
+
+
+async def test_each_reservation_uses_one_analysis(session: AsyncSession) -> None:
+    user_id = await make_user(session)
+
+    await reserve_analysis(session, user_id, limit=3)
+    await reserve_analysis(session, user_id, limit=3)
+
+    assert await counter(session, user_id) == 2
+
+
+async def test_the_limit_is_enforced_and_reported(session: AsyncSession) -> None:
+    user_id = await make_user(session)
+    for _ in range(3):
+        await reserve_analysis(session, user_id, limit=3)
+
+    with pytest.raises(AppError) as error:
+        await reserve_analysis(session, user_id, limit=3)
+
+    assert error.value.code == "daily_quota_exceeded"
+    assert error.value.status_code == 429
+    assert error.value.details == {"limit": 3}
+    assert await counter(session, user_id) == 3  # the rejected attempt was not counted
+
+
+async def test_users_have_separate_allowances(session: AsyncSession) -> None:
+    ana = await make_user(session, "ana@example.com")
+    ben = await make_user(session, "ben@example.com")
+    await reserve_analysis(session, ana, limit=1)
+
+    await reserve_analysis(session, ben, limit=1)  # must not raise
+
+    with pytest.raises(AppError):
+        await reserve_analysis(session, ana, limit=1)
+
+
+async def test_a_new_day_starts_a_new_allowance(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user_id = await make_user(session)
+    monkeypatch.setattr(usage, "today", lambda: date(2026, 9, 21))
+    await reserve_analysis(session, user_id, limit=1)
+
+    monkeypatch.setattr(usage, "today", lambda: date(2026, 9, 22))
+    day = await reserve_analysis(session, user_id, limit=1)  # must not raise
+
+    assert day == date(2026, 9, 22)
+
+
+async def test_refund_gives_the_analysis_back(session: AsyncSession) -> None:
+    user_id = await make_user(session)
+    day = await reserve_analysis(session, user_id, limit=1)
+
+    await refund_analysis(session, user_id, day)
+
+    assert await counter(session, user_id) == 0
+    await reserve_analysis(session, user_id, limit=1)  # available again
+
+
+async def test_refund_never_goes_below_zero(session: AsyncSession) -> None:
+    user_id = await make_user(session)
+    day = await reserve_analysis(session, user_id, limit=5)
+
+    await refund_analysis(session, user_id, day)
+    await refund_analysis(session, user_id, day)
+
+    assert await counter(session, user_id) == 0
+
+
+async def test_concurrent_requests_cannot_exceed_the_limit(engine: AsyncEngine) -> None:
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as setup:
+        user_id = await make_user(setup)
+
+    async def attempt() -> bool:
+        async with maker() as own_session:  # each request has its own session, as in the API
+            try:
+                await reserve_analysis(own_session, user_id, limit=3)
+            except AppError:
+                return False
+            return True
+
+    outcomes = await asyncio.gather(*(attempt() for _ in range(10)))
+
+    assert sum(outcomes) == 3
+    async with maker() as check:
+        assert await counter(check, user_id) == 3

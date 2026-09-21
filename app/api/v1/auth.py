@@ -1,18 +1,26 @@
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Request, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.api.v1.deps import SessionDep
 from app.core.errors import AppError
+from app.core.rate_limit import limiter
 from app.core.security import create_access_token, hash_password, verify_password
 from app.db.models import User
 from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# Coarse per-IP abuse protection (password guessing, mass sign-ups). Deliberately not tighter:
+# many students behind one school connection share an IP.
+AUTH_RATE_LIMIT = "20/minute"
+
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-async def register(payload: RegisterRequest, session: SessionDep) -> TokenResponse:
+@limiter.limit(AUTH_RATE_LIMIT)
+async def register(
+    request: Request, payload: RegisterRequest, session: SessionDep
+) -> TokenResponse:
     user = User(
         email=payload.email,
         password_hash=hash_password(payload.password),
@@ -35,7 +43,8 @@ async def register(payload: RegisterRequest, session: SessionDep) -> TokenRespon
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(payload: LoginRequest, session: SessionDep) -> TokenResponse:
+@limiter.limit(AUTH_RATE_LIMIT)
+async def login(request: Request, payload: LoginRequest, session: SessionDep) -> TokenResponse:
     user = await session.scalar(select(User).where(User.email == payload.email))
     # Same error and similar timing whether the email is unknown or the password is wrong,
     # so the endpoint cannot be used to discover which emails are registered.
