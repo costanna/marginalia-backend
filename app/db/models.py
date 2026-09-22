@@ -3,6 +3,7 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -15,6 +16,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -85,6 +87,19 @@ class RuleTag(enum.StrEnum):
     REGISTER_FORMAL = "register_formal"
     RUN_ON_SENTENCE = "run_on_sentence"
     OTHER = "other"
+
+
+class ExerciseType(enum.StrEnum):
+    MULTIPLE_CHOICE = "multiple_choice"
+    FILL_BLANK = "fill_blank"
+
+
+class ExerciseStatus(enum.StrEnum):
+    """`pending`: not attempted yet, offered on /practice. `done`: answered once, kept for the
+    session summary and the stats, never asked again."""
+
+    PENDING = "pending"
+    DONE = "done"
 
 
 def _text_enum[E: enum.StrEnum](enum_class: type[E], name: str, length: int = 16) -> Enum:
@@ -193,3 +208,59 @@ class UsageCounter(Base):
     day: Mapped[date] = mapped_column(Date, primary_key=True)
     analyses_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     generations_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+
+class Exercise(Base):
+    """A practice item, generated from the rules a user fails most in their last 30 days."""
+
+    __tablename__ = "exercises"
+    __table_args__ = (
+        Index("ix_exercises_user_id_status", "user_id", "status"),
+        # options is required for multiple_choice and must stay empty for fill_blank, so the
+        # question type and its shape can never drift apart.
+        CheckConstraint(
+            "(type = 'multiple_choice' AND options IS NOT NULL) "
+            "OR (type = 'fill_blank' AND options IS NULL)",
+            name="options_match_type",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # The text that prompted it, if any single one did; kept only to let the UI link back to it.
+    # ON DELETE SET NULL: deleting that text must not delete the exercise built from it.
+    source_text_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("texts.id", ondelete="SET NULL"), default=None
+    )
+    rule_tag: Mapped[RuleTag] = mapped_column(_text_enum(RuleTag, "exercise_rule_tag", length=32))
+    type: Mapped[ExerciseType] = mapped_column(_text_enum(ExerciseType, "exercise_type"))
+    prompt: Mapped[str] = mapped_column(Text)
+    # The choices, in order, for multiple_choice; null for fill_blank (see options_match_type).
+    # none_as_null: without it, a Python None is stored as the JSON scalar `null`, which is NOT
+    # SQL NULL (`options IS NULL` would then be false), silently defeating that CHECK constraint.
+    options: Mapped[list[str] | None] = mapped_column(JSONB(none_as_null=True), default=None)
+    correct_answer: Mapped[str] = mapped_column(Text)
+    explanation: Mapped[str] = mapped_column(Text)
+    status: Mapped[ExerciseStatus] = mapped_column(
+        _text_enum(ExerciseStatus, "exercise_status"), default=ExerciseStatus.PENDING
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ExerciseAttempt(Base):
+    """One answer to one exercise. An exercise is attempted at most once (see Exercise.status)."""
+
+    __tablename__ = "exercise_attempts"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    exercise_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("exercises.id", ondelete="CASCADE"), unique=True
+    )
+    # Denormalised on purpose: kept even if the exercise itself were ever removed some other way,
+    # and it is what makes "delete my account" a single, simple filter.
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    user_answer: Mapped[str] = mapped_column(Text)
+    is_correct: Mapped[bool] = mapped_column(Boolean)
+    attempted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

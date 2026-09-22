@@ -24,3 +24,11 @@ async def analyze(
     assert response.status_code == 201, response.text
     body: dict[str, Any] = response.json()
     return body
+
+
+async def generate_exercises(client: AsyncClient, headers: dict[str, str]) -> list[dict[str, Any]]:
+    """Generate (or reuse) this user's exercises and return the JSON body (asserting success)."""
+    response = await client.post("/api/v1/exercises/generate", headers=headers)
+    assert response.status_code == 200, response.text
+    body: list[dict[str, Any]] = response.json()
+    return body

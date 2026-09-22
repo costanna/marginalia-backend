@@ -5,7 +5,8 @@ from sqlalchemy import select
 
 from app.api.v1.deps import CurrentUser, SessionDep
 from app.core.rate_limit import limiter
-from app.db.models import AnalyzedText, UsageCounter, User
+from app.db.models import AnalyzedText, Exercise, ExerciseAttempt, UsageCounter, User
+from app.schemas.exercises import ExerciseAttemptExport, ExerciseExport
 from app.schemas.export import DataExport, UsageDayRead
 from app.schemas.texts import TextRead
 from app.schemas.user import UserRead, UserUpdate
@@ -46,6 +47,14 @@ async def export_my_data(
         .where(AnalyzedText.user_id == user.id)
         .order_by(AnalyzedText.created_at.desc(), AnalyzedText.id.desc())
     )
+    exercises = await session.scalars(
+        select(Exercise).where(Exercise.user_id == user.id).order_by(Exercise.created_at)
+    )
+    attempts = await session.scalars(
+        select(ExerciseAttempt)
+        .where(ExerciseAttempt.user_id == user.id)
+        .order_by(ExerciseAttempt.attempted_at)
+    )
     usage = await session.scalars(
         select(UsageCounter).where(UsageCounter.user_id == user.id).order_by(UsageCounter.day)
     )
@@ -56,6 +65,8 @@ async def export_my_data(
         exported_at=datetime.now(UTC),
         profile=UserRead.model_validate(user),
         texts=[TextRead.model_validate(text) for text in texts],
+        exercises=[ExerciseExport.model_validate(item) for item in exercises],
+        exercise_attempts=[ExerciseAttemptExport.model_validate(item) for item in attempts],
         usage=[UsageDayRead.model_validate(row) for row in usage],
     )
 

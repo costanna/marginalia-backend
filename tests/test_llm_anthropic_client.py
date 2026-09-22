@@ -8,10 +8,10 @@ import anthropic
 import httpx2
 import pytest
 
-from app.db.models import TargetLevel, UiLanguage
+from app.db.models import RuleTag, TargetLevel, UiLanguage
 from app.services.llm.anthropic_client import AnthropicClient
-from app.services.llm.base import LLMInvalidResponseError, LLMUnavailableError
-from app.services.llm.prompts import ANALYSIS_JSON_SCHEMA
+from app.services.llm.base import LLMInvalidResponseError, LLMUnavailableError, RuleFailure
+from app.services.llm.prompts import ANALYSIS_JSON_SCHEMA, EXERCISE_JSON_SCHEMA
 
 ANSWER = {
     "cefr_level": "A2",
@@ -138,3 +138,56 @@ async def test_the_learner_text_is_never_logged(caplog: pytest.LogCaptureFixture
 
     assert "private diary" not in caplog.text
     assert caplog.records  # the failure WAS logged: the assertion above is not vacuous
+
+
+# --- generate_exercises: only what differs from analyze_text --------------------------------
+# The retry/parsing logic (`_call`) is shared and already covered above; here we only check the
+# request shape and that the shared machinery is actually reused for this second entry point.
+
+EXERCISE_ANSWER: dict[str, Any] = {"exercises": []}
+
+
+async def generate_exercises(
+    client: AnthropicClient, failures: list[RuleFailure] | None = None, count: int = 4
+) -> dict[str, Any]:
+    return await client.generate_exercises(
+        rule_failures=failures or [RuleFailure(RuleTag.VERB_TENSE, (("go", "went"),))],
+        ui_language=UiLanguage.ES,
+        count=count,
+    )
+
+
+async def test_returns_the_parsed_exercise_json() -> None:
+    client = make_client(StubMessages(reply(text_block(json.dumps(EXERCISE_ANSWER)))))
+
+    assert await generate_exercises(client) == EXERCISE_ANSWER
+
+
+async def test_the_exercise_request_carries_the_schema_count_and_rules() -> None:
+    messages = StubMessages(reply(text_block(json.dumps(EXERCISE_ANSWER))))
+
+    await generate_exercises(make_client(messages), count=4)
+
+    request = messages.calls[0]
+    assert request["output_config"] == {
+        "format": {"type": "json_schema", "schema": EXERCISE_JSON_SCHEMA}
+    }
+    assert "exactly 4" in request["system"]
+    assert "Spanish" in request["system"]
+    assert request["messages"] == [
+        {"role": "user", "content": '<rules>\n- verb_tense: "go" -> "went"\n</rules>'}
+    ]
+
+
+async def test_an_unusable_exercise_answer_is_reported_as_invalid() -> None:
+    with pytest.raises(LLMInvalidResponseError):
+        await generate_exercises(make_client(StubMessages(reply(text_block("not json")))))
+
+
+async def test_provider_failure_becomes_llm_unavailable_for_exercises_too() -> None:
+    error = anthropic.InternalServerError(
+        "boom", response=httpx2.Response(500, request=REQUEST), body=None
+    )
+
+    with pytest.raises(LLMUnavailableError):
+        await generate_exercises(make_client(StubMessages(error=error)))

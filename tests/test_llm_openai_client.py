@@ -7,8 +7,8 @@ from typing import Any
 import httpx
 import pytest
 
-from app.db.models import TargetLevel, UiLanguage
-from app.services.llm.base import LLMInvalidResponseError, LLMUnavailableError
+from app.db.models import RuleTag, TargetLevel, UiLanguage
+from app.services.llm.base import LLMInvalidResponseError, LLMUnavailableError, RuleFailure
 from app.services.llm.openai_compatible_client import OpenAICompatibleClient
 
 ANSWER = {"cefr_level": "A2", "summary": "Nice.", "corrections": []}
@@ -236,3 +236,57 @@ async def test_neither_the_text_nor_the_key_is_ever_logged(
     assert "private diary" not in caplog.text
     assert API_KEY not in caplog.text
     assert caplog.records  # something WAS logged (status codes), just nothing sensitive
+
+
+# --- generate_exercises: only what differs from analyze_text --------------------------------
+# Retries, backoff and the lenient JSON parsing are the exact same code path (_post_with_retries
+# / _extract_answer), already exhaustively covered above through analyze_text; here we only check
+# that generate_exercises builds the right request and reuses that machinery.
+
+
+async def generate(
+    client: OpenAICompatibleClient, failures: list[RuleFailure] | None = None, count: int = 3
+) -> dict[str, Any]:
+    return await client.generate_exercises(
+        rule_failures=failures or [RuleFailure(RuleTag.VERB_TENSE, (("go", "went"),))],
+        ui_language=UiLanguage.CA,
+        count=count,
+    )
+
+
+EXERCISE_ANSWER: dict[str, Any] = {"exercises": []}
+
+
+async def test_the_exercise_request_carries_the_rules_and_the_count() -> None:
+    provider = Provider(ok(json.dumps(EXERCISE_ANSWER)))
+
+    await generate(provider.client(), count=5)
+
+    [request] = provider.requests
+    body = json.loads(request.content)
+    system, user = body["messages"]
+    assert "exactly 5" in system["content"]
+    assert "Catalan" in system["content"]
+    assert "Reply with ONE JSON object" in system["content"]
+    assert user == {
+        "role": "user",
+        "content": '<rules>\n- verb_tense: "go" -> "went"\n</rules>',
+    }
+
+
+async def test_the_exercise_answer_is_parsed_leniently_like_analysis() -> None:
+    fenced = "```json\n" + json.dumps(EXERCISE_ANSWER) + "\n```"
+
+    assert await generate(Provider(ok(fenced)).client()) == EXERCISE_ANSWER
+
+
+async def test_an_unusable_exercise_answer_is_reported_as_invalid() -> None:
+    with pytest.raises(LLMInvalidResponseError):
+        await generate(Provider(ok("not json")).client())
+
+
+async def test_transient_errors_are_retried_for_exercises_too() -> None:
+    provider = Provider(httpx.Response(500), ok(json.dumps(EXERCISE_ANSWER)))
+
+    assert await generate(provider.client()) == EXERCISE_ANSWER
+    assert len(provider.requests) == 2
