@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
@@ -14,6 +15,7 @@ from app.db.models import (
     CefrLevel,
     Correction,
     Exercise,
+    ExerciseAttempt,
     ExerciseStatus,
     RuleTag,
     UiLanguage,
@@ -106,6 +108,23 @@ class FailingClient:
 
     async def generate_exercises(self, **_: object) -> dict[str, Any]:
         raise self.error
+
+
+class ScriptedClient:
+    """Returns the scripted answers in order, like FakeLLMClient's real shape."""
+
+    model_name = "scripted"
+
+    def __init__(self, *answers: dict[str, Any]) -> None:
+        self.answers = list(answers)
+        self.calls = 0
+
+    async def analyze_text(self, **_: object) -> dict[str, Any]:
+        raise NotImplementedError  # unused here: only to satisfy the LLMClient protocol
+
+    async def generate_exercises(self, **_: object) -> dict[str, Any]:
+        self.calls += 1
+        return self.answers.pop(0)
 
 
 async def generation_counter(session: AsyncSession, user_id: Any) -> int:
@@ -311,6 +330,45 @@ async def test_a_failed_generation_is_refunded_and_nothing_is_saved(
     assert len(result) > 0
 
 
+VALID_EXERCISE = {
+    "rule_tag": "verb_tense",
+    "type": "fill_blank",
+    "prompt": "Yesterday I ___ home.",
+    "correct_answer": "went",
+    "explanation": "Past simple.",
+}
+
+
+async def test_an_empty_answer_is_schema_valid_but_still_retried_once(
+    session: AsyncSession, user: User
+) -> None:
+    # {"exercises": []} passes LLMExerciseSet validation, but charging a daily slot for nothing
+    # to practise would be indistinguishable from "you have no mistakes yet" — not acceptable.
+    await add_correction(session, user, RuleTag.VERB_TENSE)
+    client = ScriptedClient({"exercises": []}, {"exercises": [VALID_EXERCISE]})
+
+    result = await generate_or_reuse(session, client, user=user, daily_limit=LIMIT)
+
+    assert len(result) == 1
+    assert client.calls == 2
+    assert await generation_counter(session, user.id) == 1  # charged once, not per attempt
+
+
+async def test_two_empty_answers_in_a_row_is_llm_invalid_response(
+    session: AsyncSession, user: User
+) -> None:
+    await add_correction(session, user, RuleTag.VERB_TENSE)
+    client = ScriptedClient({"exercises": []}, {"exercises": []})
+
+    with pytest.raises(AppError) as raised:
+        await generate_or_reuse(session, client, user=user, daily_limit=LIMIT)
+
+    assert raised.value.code == "llm_invalid_response"
+    assert client.calls == 2
+    assert await generation_counter(session, user.id) == 0  # refunded
+    assert await exercise_count(session) == 0
+
+
 # --- attempt ---------------------------------------------------------------------------------
 
 
@@ -402,3 +460,45 @@ async def test_a_user_cannot_attempt_someone_elses_exercise(
         await attempt(session, user_id=other.id, exercise_id=exercise.id, user_answer="x")
 
     assert raised.value.code == "not_found"
+
+
+async def test_two_truly_concurrent_attempts_on_the_same_exercise_leave_exactly_one_winner(
+    engine: AsyncEngine,
+) -> None:
+    # Each request re-reads the exercise as still `pending` before either commits (the status
+    # pre-check alone cannot see the other one coming): the database's own unique index on
+    # exercise_id is what must break the tie, and the loser must see a clean 409, not a raw 500.
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as setup:
+        user = User(email="ana@example.com", password_hash="x", display_name="Ana")
+        setup.add(user)
+        await setup.flush()
+        await add_correction(setup, user, RuleTag.VERB_TENSE)
+        batch = await generate_or_reuse(setup, FakeLLMClient(), user=user, daily_limit=LIMIT)
+        user_id, exercise_id = user.id, batch[0].id
+
+    async def try_attempt() -> str:
+        async with maker() as own_session:  # each request has its own session, as in the API
+            try:
+                await attempt(
+                    own_session, user_id=user_id, exercise_id=exercise_id, user_answer="x"
+                )
+                return "ok"
+            except AppError as error:
+                return error.code
+
+    outcomes = await asyncio.gather(*(try_attempt() for _ in range(5)))
+
+    assert outcomes.count("ok") == 1
+    assert set(outcomes) - {"ok"} == {ALREADY_ATTEMPTED}
+    async with maker() as check:
+        exercise = await check.get(Exercise, exercise_id)
+        assert exercise is not None and exercise.status is ExerciseStatus.DONE
+        attempts_saved = (
+            await check.execute(
+                select(func.count())
+                .select_from(ExerciseAttempt)
+                .where(ExerciseAttempt.exercise_id == exercise_id)
+            )
+        ).scalar_one()
+        assert attempts_saved == 1  # the race left exactly one row, not zero or several

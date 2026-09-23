@@ -142,17 +142,20 @@ def locate_corrections(text: str, corrections: list[LLMCorrection]) -> list[Loca
     taken: list[tuple[int, int]] = []
     located: list[LocatedCorrection] = []
     for correction in corrections:
-        if correction.suggestion == correction.original:
+        # The stored text is NFC; models sometimes quote a decomposed form of the same letters.
+        original = unicodedata.normalize("NFC", correction.original)
+        suggestion = unicodedata.normalize("NFC", correction.suggestion)
+        if suggestion == original:
             continue
-        for start, end in _occurrences(text, correction.original):
+        for start, end in _occurrences(text, original):
             if not _overlaps(start, end, taken):
                 taken.append((start, end))
                 located.append(
                     LocatedCorrection(
                         start=start,
                         end=end,
-                        original=correction.original,
-                        suggestion=correction.suggestion,
+                        original=original,
+                        suggestion=suggestion,
                         category=correction.category,
                         rule_tag=correction.rule_tag,
                         explanation=correction.explanation,
