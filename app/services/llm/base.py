@@ -86,16 +86,32 @@ class LLMExercise(BaseModel):
         """The two exercise types are validated as strictly as the database CHECK constraint
         (`options_match_type`): a shape mismatch here would otherwise surface as a 500 on insert."""
         if self.type is ExerciseType.MULTIPLE_CHOICE:
-            if self.options is None or len(self.options) < 2:
+            unique = _unique_options(self.options)
+            answer = self.correct_answer.strip()
+            if len(unique) < 2:
                 raise ValueError("multiple_choice needs at least 2 options")
-            if self.correct_answer not in self.options:
+            if answer not in unique:
                 raise ValueError("correct_answer must be one of options")
+            self.options = unique
+            self.correct_answer = answer
         else:
             if self.options is not None:
                 raise ValueError("fill_blank must not have options")
             if self.prompt.count(BLANK_MARKER) != 1:
                 raise ValueError(f"fill_blank prompt must contain exactly one {BLANK_MARKER}")
         return self
+
+
+def _unique_options(options: list[str] | None) -> list[str]:
+    """Drop blanks and repeats (models often duplicate a distractor); keep first-seen order."""
+    unique: list[str] = []
+    seen: set[str] = set()
+    for option in options or []:
+        cleaned = option.strip()
+        if cleaned and cleaned not in seen:
+            seen.add(cleaned)
+            unique.append(cleaned)
+    return unique
 
 
 class LLMExerciseSet(BaseModel):

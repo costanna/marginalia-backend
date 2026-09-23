@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 
 from pydantic import ValidationError
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
@@ -100,7 +101,12 @@ async def _ask_llm_for_exercises(
             raw = await client.generate_exercises(
                 rule_failures=rule_failures, ui_language=user.ui_language, count=count
             )
-            return LLMExerciseSet.model_validate(raw)
+            parsed = LLMExerciseSet.model_validate(raw)
+            # An empty list is schema-valid, but a charged generation that yields nothing would
+            # look like "you have nothing to practise" after spending a daily slot.
+            if not parsed.exercises:
+                continue
+            return parsed
         except (LLMInvalidResponseError, ValidationError):
             continue
         except LLMUnavailableError:
@@ -201,7 +207,16 @@ async def attempt(
             exercise_id=exercise.id, user_id=user_id, user_answer=user_answer, is_correct=is_correct
         )
     )
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        # Two tabs answering the same pending exercise: the unique index on exercise_id wins.
+        await session.rollback()
+        raise AppError(
+            code=ALREADY_ATTEMPTED,
+            message="This exercise has already been answered.",
+            status_code=409,
+        ) from None
     return AttemptResult(
         is_correct=is_correct,
         correct_answer=exercise.correct_answer,

@@ -162,6 +162,7 @@ A test fails if a model changes without its migration.
   reject "multiple-choice without options" pass silently, since `options IS NOT NULL` is true for a
   stored `null`. Fixed with `JSONB(none_as_null=True)`; caught by a test that inserts exactly that row
   and expects the database to refuse it.
+
 - **Nothing new is stored for progress.** The four `/stats/*` endpoints only read `texts` and
   `corrections`, so this phase needed no migration; deleting a text (already possible since Phase 5)
   removes it from every KPI and chart on its own.
@@ -180,6 +181,22 @@ A test fails if a model changes without its migration.
   slice, colour and legend entry per category, whether or not the user has ever made that kind of
   mistake; `top-rules` does the opposite on purpose and returns nothing when there is nothing to show,
   since an empty bar chart is exactly what "no repeated mistakes yet" should look like.
+=======
+- **Two attempts on the same exercise, truly concurrent, are resolved by the database, not by the
+  application.** The `if status != pending: reject` check alone cannot see a second request that read
+  the row before the first one committed; the real guard is the unique index on `exercise_id` in
+  `exercise_attempts`, and the loser's `IntegrityError` is turned into the same `409
+  exercise_already_attempted` instead of leaking a 500. Proven with `asyncio.gather` firing five
+  attempts at once against real, separate sessions (the same technique the daily-quota test uses).
+- **A model's quoted correction can be Unicode-decomposed** even when the saved text is always
+  NFC-composed (`clean_text` does that): the model's tokenizer can reconstruct an accented letter as
+  the base letter plus a combining mark. Both `original` and `suggestion` are normalised to NFC before
+  they are searched for, or a real accented word would silently fail to match and the correction
+  would be dropped.
+- **A model's multiple-choice options are deduplicated and trimmed** before validation (a repeated
+  distractor or padding whitespace is common); `correct_answer` is compared and stored the same way,
+  so "an" and " an " count as the same choice.
+
 
 ## Deployment (Neon + Render, both free)
 

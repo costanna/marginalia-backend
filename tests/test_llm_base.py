@@ -96,6 +96,21 @@ def test_a_valid_multiple_choice_exercise_is_parsed() -> None:
     assert exercise.correct_answer == "an"
 
 
+def test_multiple_choice_options_are_deduplicated_and_trimmed() -> None:
+    # Real models sometimes pad an option with spaces or repeat a distractor.
+    exercise = LLMExercise.model_validate(
+        {**MULTIPLE_CHOICE, "options": [" a ", "an", "an", "the", ""], "correct_answer": " an "}
+    )
+
+    assert exercise.options == ["a", "an", "the"]  # blanks dropped, repeats dropped, order kept
+    assert exercise.correct_answer == "an"
+
+
+def test_an_option_list_that_dedupes_below_two_choices_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        LLMExercise.model_validate({**MULTIPLE_CHOICE, "options": ["an", " an ", "  ", ""]})
+
+
 def test_a_valid_fill_blank_exercise_is_parsed() -> None:
     exercise = LLMExercise.model_validate(FILL_BLANK)
 
