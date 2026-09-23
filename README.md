@@ -5,7 +5,7 @@
 REST API for **Marginalia**, an AI-powered English corrector that annotates a learner's text like a
 teacher's margin notes, estimates the CEFR level and builds personalised exercises.
 
-> Status: **Phase 6 (practice/exercises)** done. Statistics (Phase 7) is next.
+> Status: **Phase 7 (progress statistics)** done. Deployment polish (Phase 8) is next.
 
 Frontend: [marginalia-frontend](https://github.com/costanna/marginalia-frontend)
 
@@ -38,23 +38,27 @@ alembic upgrade head                     # apply migrations
 
 ## Endpoints
 
-| Method | Route                            | Auth | Description                                                          |
-| ------ | -------------------------------- | ---- | -------------------------------------------------------------------- |
-| GET    | `/api/v1/health`                 | No   | Liveness probe (also wakes the free-tier host)                       |
-| POST   | `/api/v1/auth/register`          | No   | Create an account and return an access token                         |
-| POST   | `/api/v1/auth/login`             | No   | Return an access token                                               |
-| GET    | `/api/v1/me`                     | Yes  | Current profile                                                      |
-| PATCH  | `/api/v1/me`                     | Yes  | Update name, UI language, theme, target level                        |
-| GET    | `/api/v1/me/export`              | Yes  | All your data as a JSON download (5 per minute)                      |
-| DELETE | `/api/v1/me`                     | Yes  | Delete the account and all its data                                  |
-| POST   | `/api/v1/demo/analyze`           | No   | Try the corrector, nothing saved (limited per IP)                    |
-| POST   | `/api/v1/texts/analyze`          | Yes  | Analyse a text, save it, return the corrections                      |
-| GET    | `/api/v1/texts`                  | Yes  | History (`?page=&page_size=&level=B1`)                               |
-| GET    | `/api/v1/texts/{id}`             | Yes  | One text with its corrections                                        |
-| DELETE | `/api/v1/texts/{id}`             | Yes  | Delete a text                                                        |
-| POST   | `/api/v1/exercises/generate`     | Yes  | Build exercises from your worst rules, or reuse pending ones (5/day) |
-| GET    | `/api/v1/exercises`              | Yes  | Your exercises (`?status=pending` or `done`)                         |
-| POST   | `/api/v1/exercises/{id}/attempt` | Yes  | Grade one answer; reveals `correct_answer` and `explanation`         |
+| Method | Route                              | Auth | Description                                                          |
+| ------ | ---------------------------------- | ---- | -------------------------------------------------------------------- |
+| GET    | `/api/v1/health`                   | No   | Liveness probe (also wakes the free-tier host)                       |
+| POST   | `/api/v1/auth/register`            | No   | Create an account and return an access token                         |
+| POST   | `/api/v1/auth/login`               | No   | Return an access token                                               |
+| GET    | `/api/v1/me`                       | Yes  | Current profile                                                      |
+| PATCH  | `/api/v1/me`                       | Yes  | Update name, UI language, theme, target level                        |
+| GET    | `/api/v1/me/export`                | Yes  | All your data as a JSON download (5 per minute)                      |
+| DELETE | `/api/v1/me`                       | Yes  | Delete the account and all its data                                  |
+| POST   | `/api/v1/demo/analyze`             | No   | Try the corrector, nothing saved (limited per IP)                    |
+| POST   | `/api/v1/texts/analyze`            | Yes  | Analyse a text, save it, return the corrections                      |
+| GET    | `/api/v1/texts`                    | Yes  | History (`?page=&page_size=&level=B1`)                               |
+| GET    | `/api/v1/texts/{id}`               | Yes  | One text with its corrections                                        |
+| DELETE | `/api/v1/texts/{id}`               | Yes  | Delete a text                                                        |
+| POST   | `/api/v1/exercises/generate`       | Yes  | Build exercises from your worst rules, or reuse pending ones (5/day) |
+| GET    | `/api/v1/exercises`                | Yes  | Your exercises (`?status=pending` or `done`)                         |
+| POST   | `/api/v1/exercises/{id}/attempt`   | Yes  | Grade one answer; reveals `correct_answer` and `explanation`         |
+| GET    | `/api/v1/stats/overview`           | Yes  | KPIs and the current day streak                                      |
+| GET    | `/api/v1/stats/progress`           | Yes  | Errors per 100 words over time (`?days=90`)                          |
+| GET    | `/api/v1/stats/errors-by-category` | Yes  | Correction counts per category, zero-filled (`?days=30`)             |
+| GET    | `/api/v1/stats/top-rules`          | Yes  | The 5 most-failed rules (`?days=30`)                                 |
 
 **Correction offsets** (`start`, `end`) are **Unicode code points** into `original_text`, end-exclusive
 (Python string indices). JavaScript strings use UTF-16 units, so the frontend must convert them (an
@@ -158,6 +162,24 @@ A test fails if a model changes without its migration.
   reject "multiple-choice without options" pass silently, since `options IS NOT NULL` is true for a
   stored `null`. Fixed with `JSONB(none_as_null=True)`; caught by a test that inserts exactly that row
   and expects the database to refuse it.
+- **Nothing new is stored for progress.** The four `/stats/*` endpoints only read `texts` and
+  `corrections`, so this phase needed no migration; deleting a text (already possible since Phase 5)
+  removes it from every KPI and chart on its own.
+- **A join fan-out nearly shipped a wrong word count.** The first version of `/stats/progress`
+  joined `corrections` straight into a per-day `SUM(texts.word_count)`: a text with 2 corrections then
+  counted its own words twice, one with none counted them once, so the per-day totals were simply
+  wrong. A test comparing a 2-correction text's contribution against a 0-correction one caught it
+  immediately; the fix aggregates per **text** first (its own word count, its own correction count)
+  and only then sums that per-text result by day.
+- **The day streak forgives "today", not two days in a row.** If yesterday has an analysed text but
+  today does not yet, the streak is still shown as alive (the day is not over); two idle days back to
+  back end it. `compute_streak` is a pure function, exhaustively tested and mutation-checked, that
+  takes a set of active UTC days and "today" as plain arguments — nothing about it touches the
+  database, so the streak rule can be read and verified without one.
+- **`errors-by-category` always returns all 5 categories, zero-filled.** A donut chart wants a stable
+  slice, colour and legend entry per category, whether or not the user has ever made that kind of
+  mistake; `top-rules` does the opposite on purpose and returns nothing when there is nothing to show,
+  since an empty bar chart is exactly what "no repeated mistakes yet" should look like.
 
 ## Deployment (Neon + Render, both free)
 
