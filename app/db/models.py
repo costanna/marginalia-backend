@@ -28,6 +28,7 @@ class UiLanguage(enum.StrEnum):
     CA = "ca"
     ES = "es"
     EN = "en"
+    FR = "fr"
 
 
 class ThemePreference(enum.StrEnum):

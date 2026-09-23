@@ -94,7 +94,7 @@ async def test_a_blank_title_is_stored_as_no_title(client: AsyncClient) -> None:
         ({"text": "x" * 20_001}, 422, "validation_error"),
         ({}, 422, "validation_error"),
         ({"text": TEXT, "unknown": 1}, 422, "validation_error"),
-        ({"text": TEXT, "ui_language": "fr"}, 422, "validation_error"),
+        ({"text": TEXT, "ui_language": "de"}, 422, "validation_error"),
         ({"text": TEXT, "title": "t" * 201}, 422, "validation_error"),
     ],
 )

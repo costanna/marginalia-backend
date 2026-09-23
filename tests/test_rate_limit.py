@@ -122,7 +122,7 @@ async def test_the_demo_saves_nothing(client: AsyncClient, engine: AsyncEngine) 
         ({"text": "too short"}, "text_too_short"),
         ({"text": "x" * 3001}, "text_too_long"),
         ({}, "validation_error"),
-        ({"text": TEXT, "ui_language": "fr"}, "validation_error"),
+        ({"text": TEXT, "ui_language": "de"}, "validation_error"),
     ],
 )
 async def test_the_demo_validates_its_input(

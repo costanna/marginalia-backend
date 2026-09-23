@@ -29,13 +29,14 @@ def _rule(
     ca: str,
     es: str,
     en: str,
+    fr: str,
 ) -> FakeRule:
     return FakeRule(
         re.compile(pattern),
         suggestion,
         category,
         rule_tag,
-        {UiLanguage.CA: ca, UiLanguage.ES: es, UiLanguage.EN: en},
+        {UiLanguage.CA: ca, UiLanguage.ES: es, UiLanguage.EN: en, UiLanguage.FR: fr},
     )
 
 
@@ -48,6 +49,7 @@ FAKE_RULES: tuple[FakeRule, ...] = (
         "Amb 'yesterday' s'usa el passat simple: 'went'.",
         "Con 'yesterday' se usa el pasado simple: 'went'.",
         "With 'yesterday' use the past simple: 'went'.",
+        "Avec 'yesterday', on utilise le passé simple : 'went'.",
     ),
     _rule(
         r"\bgoed\b",
@@ -57,6 +59,7 @@ FAKE_RULES: tuple[FakeRule, ...] = (
         "'Go' és irregular: el passat és 'went'.",
         "'Go' es irregular: su pasado es 'went'.",
         "'Go' is irregular: its past is 'went'.",
+        "'Go' est irrégulier : son passé est 'went'.",
     ),
     _rule(
         r"\bI has\b",
@@ -66,6 +69,7 @@ FAKE_RULES: tuple[FakeRule, ...] = (
         "Amb 'I' s'usa 'have', no 'has'.",
         "Con 'I' se usa 'have', no 'has'.",
         "With 'I' use 'have', not 'has'.",
+        "Avec 'I', on utilise 'have', pas 'has'.",
     ),
     _rule(
         r"\ba(?= [aeiouAEIOU])",
@@ -75,6 +79,7 @@ FAKE_RULES: tuple[FakeRule, ...] = (
         "Davant d'un so vocàlic s'usa 'an'.",
         "Ante un sonido vocálico se usa 'an'.",
         "Before a vowel sound use 'an'.",
+        "Devant un son vocalique, on utilise 'an'.",
     ),
     _rule(
         r"\brecieve\b",
@@ -84,6 +89,7 @@ FAKE_RULES: tuple[FakeRule, ...] = (
         "S'escriu 'receive': després de 'c', primer la 'e'.",
         "Se escribe 'receive': después de 'c', primero la 'e'.",
         "It is spelt 'receive': after 'c', 'e' comes first.",
+        "Ça s'écrit 'receive' : après 'c', le 'e' vient en premier.",
     ),
     _rule(
         r"\bteh\b",
@@ -93,6 +99,7 @@ FAKE_RULES: tuple[FakeRule, ...] = (
         "Falta d'ortografia: 'the'.",
         "Error de escritura: 'the'.",
         "Typo: 'the'.",
+        "Faute de frappe : 'the'.",
     ),
     _rule(
         r"\bdont\b",
@@ -102,6 +109,7 @@ FAKE_RULES: tuple[FakeRule, ...] = (
         "Falta l'apòstrof: 'don't'.",
         "Falta el apóstrofo: 'don't'.",
         "The apostrophe is missing: 'don't'.",
+        "L'apostrophe manque : 'don't'.",
     ),
 )
 
@@ -109,6 +117,7 @@ SUMMARIES: dict[UiLanguage, str] = {
     UiLanguage.CA: "Bon començament! He trobat {n} coses per millorar; ho tens a prop.",
     UiLanguage.ES: "¡Buen comienzo! He encontrado {n} cosas que mejorar; lo tienes cerca.",
     UiLanguage.EN: "Good start! I found {n} things to improve; you are close.",
+    UiLanguage.FR: "Bon début ! J'ai trouvé {n} choses à améliorer ; vous y êtes presque.",
 }
 
 
@@ -139,6 +148,7 @@ def _exercise(
     ca: str,
     es: str,
     en: str,
+    fr: str,
 ) -> FakeExerciseTemplate:
     return FakeExerciseTemplate(
         fill_blank_prompt,
@@ -146,7 +156,7 @@ def _exercise(
         multiple_choice_prompt,
         multiple_choice_options,
         multiple_choice_answer,
-        {UiLanguage.CA: ca, UiLanguage.ES: es, UiLanguage.EN: en},
+        {UiLanguage.CA: ca, UiLanguage.ES: es, UiLanguage.EN: en, UiLanguage.FR: fr},
     )
 
 
@@ -163,6 +173,7 @@ EXERCISE_TEMPLATES: dict[RuleTag, FakeExerciseTemplate] = {
         "Amb 'yesterday' s'usa el passat simple: 'went'.",
         "Con 'yesterday' se usa el pasado simple: 'went'.",
         "With 'yesterday' use the past simple: 'went'.",
+        "Avec 'yesterday', on utilise le passé simple : 'went'.",
     ),
     RuleTag.SUBJECT_VERB_AGREEMENT: _exercise(
         "I ___ a new bike.",
@@ -173,6 +184,7 @@ EXERCISE_TEMPLATES: dict[RuleTag, FakeExerciseTemplate] = {
         "Amb 'I' s'usa 'have', no 'has'.",
         "Con 'I' se usa 'have', no 'has'.",
         "With 'I' use 'have', not 'has'.",
+        "Avec 'I', on utilise 'have', pas 'has'.",
     ),
     RuleTag.ARTICLES: _exercise(
         "She is ___ engineer.",
@@ -183,6 +195,7 @@ EXERCISE_TEMPLATES: dict[RuleTag, FakeExerciseTemplate] = {
         "Davant d'un so vocàlic s'usa 'an'.",
         "Ante un sonido vocálico se usa 'an'.",
         "Before a vowel sound use 'an'.",
+        "Devant un son vocalique, on utilise 'an'.",
     ),
     RuleTag.SPELLING_COMMON: _exercise(
         "Please open ___ door.",
@@ -193,6 +206,7 @@ EXERCISE_TEMPLATES: dict[RuleTag, FakeExerciseTemplate] = {
         "S'escriu 'the'.",
         "Se escribe 'the'.",
         "It is spelt 'the'.",
+        "Ça s'écrit 'the'.",
     ),
 }
 
@@ -206,6 +220,7 @@ _GENERIC_EXERCISE_TEMPLATE = _exercise(
     "Falta l'apòstrof: 'don't'.",
     "Falta el apóstrofo: 'don't'.",
     "The apostrophe is missing: 'don't'.",
+    "L'apostrophe manque : 'don't'.",
 )
 
 

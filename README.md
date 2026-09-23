@@ -5,7 +5,8 @@
 REST API for **Marginalia**, an AI-powered English corrector that annotates a learner's text like a
 teacher's margin notes, estimates the CEFR level and builds personalised exercises.
 
-> Status: **Phase 7 (progress statistics)** done. Deployment polish (Phase 8) is next.
+> Status: **Phase 9 (portfolio polish)**. All planned phases (0-9) are done; the interface now also
+> supports French alongside Catalan, Spanish and English.
 
 Frontend: [marginalia-frontend](https://github.com/costanna/marginalia-frontend)
 
@@ -196,7 +197,13 @@ A test fails if a model changes without its migration.
 - **A model's multiple-choice options are deduplicated and trimmed** before validation (a repeated
   distractor or padding whitespace is common); `correct_answer` is compared and stored the same way,
   so "an" and " an " count as the same choice.
-
+- **`UiLanguage` is a CHECK constraint, not a native Postgres enum** (see `_text_enum` in
+  `db/models.py`), specifically so adding French later was one migration that drops and recreates two
+  CHECK constraints (`ui_language` on `users`, `ui_language_used` on `texts`) with the wider value
+  list — no `ALTER TYPE ... ADD VALUE` (which cannot run inside a transaction on older Postgres and
+  can never remove a value again). The fake LLM client's per-rule explanations, its exercise
+  templates and the real providers' `LANGUAGE_NAMES` map all had to grow a fourth entry too; nothing
+  enumerates "the three languages" anywhere else in the backend.
 
 ## Deployment (Neon + Render, both free)
 
