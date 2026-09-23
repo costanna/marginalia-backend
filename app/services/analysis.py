@@ -60,9 +60,6 @@ class AnalysisResult:
     corrections: list[LocatedCorrection]
 
 
-# --- Cleaning and validation -------------------------------------------------------------------
-
-
 def clean_text(raw: str) -> str:
     """Normalise the text so the LLM, the database and the offsets all see the same string.
 
@@ -98,9 +95,6 @@ def validate_length(text: str, max_chars: int) -> None:
             status_code=422,
             details={"min": MIN_TEXT_CHARS, "max": max_chars, "length": length},
         )
-
-
-# --- Placing corrections in the text ------------------------------------------------------------
 
 
 def _is_word_char(char: str) -> bool:
@@ -177,9 +171,6 @@ def apply_corrections(text: str, corrections: list[LocatedCorrection]) -> str:
     return corrected
 
 
-# --- Talking to the LLM -------------------------------------------------------------------------
-
-
 async def ask_llm(
     client: LLMClient,
     *,
@@ -231,9 +222,6 @@ async def analyze(
         word_count=count_words(cleaned),
         corrections=corrections,
     )
-
-
-# --- Saving -------------------------------------------------------------------------------------
 
 
 async def analyze_and_save(

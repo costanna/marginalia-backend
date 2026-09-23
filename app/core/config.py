@@ -20,7 +20,6 @@ class Settings(BaseSettings):
     # NoDecode: read the raw string ("a,b") instead of expecting JSON, then split it below.
     cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:4200"]
 
-    # --- LLM ---
     # fake: deterministic offline client (development, tests; costs nothing).
     # openai_compatible: any provider speaking the OpenAI chat protocol, including free tiers
     #   (Groq, Gemini, OpenRouter, ...); needs LLM_BASE_URL, LLM_API_KEY and LLM_MODEL.
@@ -33,7 +32,6 @@ class Settings(BaseSettings):
     # Upper bound for one analysis response; keeps a runaway generation from costing too much.
     llm_max_tokens: int = Field(default=4096, gt=0)
 
-    # --- Limits ---
     max_text_chars: int = Field(default=3000, gt=0)
     daily_analysis_limit: int = Field(default=10, gt=0)
     daily_generation_limit: int = Field(default=5, gt=0)

@@ -108,8 +108,6 @@ ANALYSIS_JSON_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
-# --- Exercise generation -------------------------------------------------------------------------
-
 EXERCISE_SYSTEM_PROMPT = """\
 You are a patient, encouraging English teacher for learners whose native language is \
 {native_language}. Below, inside <rules> tags, is a list of grammar or vocabulary rules this \
