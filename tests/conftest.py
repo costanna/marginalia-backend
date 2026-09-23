@@ -42,6 +42,7 @@ os.environ["LLM_API_KEY"] = ""
 os.environ["LLM_MODEL"] = ""
 os.environ["MAX_TEXT_CHARS"] = "3000"
 os.environ["DAILY_ANALYSIS_LIMIT"] = "10"
+os.environ["DAILY_GENERATION_LIMIT"] = "5"
 os.environ["DEMO_DAILY_LIMIT"] = "2"
 
 from app.core.config import get_settings  # noqa: E402

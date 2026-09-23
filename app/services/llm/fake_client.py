@@ -8,7 +8,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from app.db.models import Category, RuleTag, TargetLevel, UiLanguage
+from app.db.models import Category, ExerciseType, RuleTag, TargetLevel, UiLanguage
+from app.services.llm.base import RuleFailure
 
 
 @dataclass(frozen=True)
@@ -119,6 +120,95 @@ def _estimate_level(word_count: int) -> str:
     return "C1"
 
 
+@dataclass(frozen=True)
+class FakeExerciseTemplate:
+    fill_blank_prompt: str
+    fill_blank_answer: str
+    multiple_choice_prompt: str
+    multiple_choice_options: tuple[str, ...]
+    multiple_choice_answer: str
+    explanation: dict[UiLanguage, str]
+
+
+def _exercise(
+    fill_blank_prompt: str,
+    fill_blank_answer: str,
+    multiple_choice_prompt: str,
+    multiple_choice_options: tuple[str, ...],
+    multiple_choice_answer: str,
+    ca: str,
+    es: str,
+    en: str,
+) -> FakeExerciseTemplate:
+    return FakeExerciseTemplate(
+        fill_blank_prompt,
+        fill_blank_answer,
+        multiple_choice_prompt,
+        multiple_choice_options,
+        multiple_choice_answer,
+        {UiLanguage.CA: ca, UiLanguage.ES: es, UiLanguage.EN: en},
+    )
+
+
+# One canned exercise (of each type) per rule the fake client knows how to teach. A real provider
+# writes fresh sentences from the learner's own mistakes; the fake only needs to be deterministic
+# and speak the same contract, so a small, hand-picked catalogue is enough.
+EXERCISE_TEMPLATES: dict[RuleTag, FakeExerciseTemplate] = {
+    RuleTag.VERB_TENSE: _exercise(
+        "Yesterday I ___ to the cinema with my friends.",
+        "went",
+        "Yesterday I ___ to the cinema with my friends.",
+        ("go", "went", "goes", "gone"),
+        "went",
+        "Amb 'yesterday' s'usa el passat simple: 'went'.",
+        "Con 'yesterday' se usa el pasado simple: 'went'.",
+        "With 'yesterday' use the past simple: 'went'.",
+    ),
+    RuleTag.SUBJECT_VERB_AGREEMENT: _exercise(
+        "I ___ a new bike.",
+        "have",
+        "I ___ a new bike.",
+        ("has", "have", "having", "haves"),
+        "have",
+        "Amb 'I' s'usa 'have', no 'has'.",
+        "Con 'I' se usa 'have', no 'has'.",
+        "With 'I' use 'have', not 'has'.",
+    ),
+    RuleTag.ARTICLES: _exercise(
+        "She is ___ engineer.",
+        "an",
+        "She is ___ engineer.",
+        ("a", "an", "the", "-"),
+        "an",
+        "Davant d'un so vocàlic s'usa 'an'.",
+        "Ante un sonido vocálico se usa 'an'.",
+        "Before a vowel sound use 'an'.",
+    ),
+    RuleTag.SPELLING_COMMON: _exercise(
+        "Please open ___ door.",
+        "the",
+        "Please open ___ door.",
+        ("teh", "the", "hte", "th"),
+        "the",
+        "S'escriu 'the'.",
+        "Se escribe 'the'.",
+        "It is spelt 'the'.",
+    ),
+}
+
+# Used for any rule outside the small catalogue above (still a real, closed RuleTag value).
+_GENERIC_EXERCISE_TEMPLATE = _exercise(
+    "She ___ like the cinema.",
+    "doesn't",
+    "She ___ like the cinema.",
+    ("dont", "don't", "do'nt", "doesnt"),
+    "don't",
+    "Falta l'apòstrof: 'don't'.",
+    "Falta el apóstrofo: 'don't'.",
+    "The apostrophe is missing: 'don't'.",
+)
+
+
 class FakeLLMClient:
     model_name = "fake-llm"
 
@@ -149,3 +239,42 @@ class FakeLLMClient:
             "summary": SUMMARIES[ui_language].format(n=len(corrections)),
             "corrections": corrections,
         }
+
+    async def generate_exercises(
+        self,
+        *,
+        rule_failures: list[RuleFailure],
+        ui_language: UiLanguage,
+        count: int,
+    ) -> dict[str, Any]:
+        # Deterministic: cycles through the given rules (falling back to `other` when there are
+        # none) and alternates the two exercise types, so tests can assert exact output.
+        rule_tags = [failure.rule_tag for failure in rule_failures] or [RuleTag.OTHER]
+        exercises: list[dict[str, Any]] = []
+        for index in range(count):
+            rule_tag = rule_tags[index % len(rule_tags)]
+            template = EXERCISE_TEMPLATES.get(rule_tag, _GENERIC_EXERCISE_TEMPLATE)
+            explanation = template.explanation[ui_language]
+            if index % 2 == 0:
+                exercises.append(
+                    {
+                        "rule_tag": rule_tag.value,
+                        "type": ExerciseType.FILL_BLANK.value,
+                        "prompt": template.fill_blank_prompt,
+                        "options": None,
+                        "correct_answer": template.fill_blank_answer,
+                        "explanation": explanation,
+                    }
+                )
+            else:
+                exercises.append(
+                    {
+                        "rule_tag": rule_tag.value,
+                        "type": ExerciseType.MULTIPLE_CHOICE.value,
+                        "prompt": template.multiple_choice_prompt,
+                        "options": list(template.multiple_choice_options),
+                        "correct_answer": template.multiple_choice_answer,
+                        "explanation": explanation,
+                    }
+                )
+        return {"exercises": exercises}

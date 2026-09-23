@@ -5,7 +5,7 @@
 REST API for **Marginalia**, an AI-powered English corrector that annotates a learner's text like a
 teacher's margin notes, estimates the CEFR level and builds personalised exercises.
 
-> Status: **Phase 5 (history, export)** done. Exercises (Phase 6) and statistics (Phase 7) are next.
+> Status: **Phase 6 (practice/exercises)** done. Statistics (Phase 7) is next.
 
 Frontend: [marginalia-frontend](https://github.com/costanna/marginalia-frontend)
 
@@ -38,20 +38,23 @@ alembic upgrade head                     # apply migrations
 
 ## Endpoints
 
-| Method | Route                     | Auth | Description                                        |
-| ------ | ------------------------- | ---- | -------------------------------------------------- |
-| GET    | `/api/v1/health`          | No   | Liveness probe (also wakes the free-tier host)     |
-| POST   | `/api/v1/auth/register`   | No   | Create an account and return an access token       |
-| POST   | `/api/v1/auth/login`      | No   | Return an access token                             |
-| GET    | `/api/v1/me`              | Yes  | Current profile                                    |
-| PATCH  | `/api/v1/me`              | Yes  | Update name, UI language, theme, target level      |
-| GET    | `/api/v1/me/export`       | Yes  | All your data as a JSON download (5 per minute)    |
-| DELETE | `/api/v1/me`              | Yes  | Delete the account and all its data                |
-| POST   | `/api/v1/demo/analyze`    | No   | Try the corrector, nothing saved (limited per IP)  |
-| POST   | `/api/v1/texts/analyze`   | Yes  | Analyse a text, save it, return the corrections    |
-| GET    | `/api/v1/texts`           | Yes  | History (`?page=&page_size=&level=B1`)             |
-| GET    | `/api/v1/texts/{id}`      | Yes  | One text with its corrections                      |
-| DELETE | `/api/v1/texts/{id}`      | Yes  | Delete a text                                      |
+| Method | Route                            | Auth | Description                                                          |
+| ------ | -------------------------------- | ---- | -------------------------------------------------------------------- |
+| GET    | `/api/v1/health`                 | No   | Liveness probe (also wakes the free-tier host)                       |
+| POST   | `/api/v1/auth/register`          | No   | Create an account and return an access token                         |
+| POST   | `/api/v1/auth/login`             | No   | Return an access token                                               |
+| GET    | `/api/v1/me`                     | Yes  | Current profile                                                      |
+| PATCH  | `/api/v1/me`                     | Yes  | Update name, UI language, theme, target level                        |
+| GET    | `/api/v1/me/export`              | Yes  | All your data as a JSON download (5 per minute)                      |
+| DELETE | `/api/v1/me`                     | Yes  | Delete the account and all its data                                  |
+| POST   | `/api/v1/demo/analyze`           | No   | Try the corrector, nothing saved (limited per IP)                    |
+| POST   | `/api/v1/texts/analyze`          | Yes  | Analyse a text, save it, return the corrections                      |
+| GET    | `/api/v1/texts`                  | Yes  | History (`?page=&page_size=&level=B1`)                               |
+| GET    | `/api/v1/texts/{id}`             | Yes  | One text with its corrections                                        |
+| DELETE | `/api/v1/texts/{id}`             | Yes  | Delete a text                                                        |
+| POST   | `/api/v1/exercises/generate`     | Yes  | Build exercises from your worst rules, or reuse pending ones (5/day) |
+| GET    | `/api/v1/exercises`              | Yes  | Your exercises (`?status=pending` or `done`)                         |
+| POST   | `/api/v1/exercises/{id}/attempt` | Yes  | Grade one answer; reveals `correct_answer` and `explanation`         |
 
 **Correction offsets** (`start`, `end`) are **Unicode code points** into `original_text`, end-exclusive
 (Python string indices). JavaScript strings use UTF-16 units, so the frontend must convert them (an
@@ -139,6 +142,22 @@ A test fails if a model changes without its migration.
   shared store. Behind a reverse proxy set `TRUSTED_PROXY_HOPS` (3 on Render) so visitors are told
   apart; the client-controlled part of `X-Forwarded-For` is never trusted.
 - **Enums stored as `VARCHAR` + `CHECK`** instead of native PostgreSQL enums: much easier to migrate.
+- **An exercise batch is generated once and reused.** `/exercises/generate` returns the pending batch
+  untouched (no LLM call, no quota spent) until every exercise in it has been attempted; only then does
+  the next call build a fresh one from the 3 rules the user fails most in the last 30 days, grounded in
+  a few of their own real mistakes.
+- **The correct answer is never sent to the client before an attempt.** `GET /exercises` and the
+  response of `/generate` deliberately omit `correct_answer` and `explanation`; only
+  `POST /exercises/{id}/attempt` reveals them, and only for the one exercise just answered. The full
+  data export (`/me/export`) is the one place both are shown ahead of time — it is the user's own
+  data, not an active practice session. An exercise accepts one attempt: a second one is `409
+  exercise_already_attempted`, a code outside the spec's original list, added the same way the others
+  were (a stable code, a translation in the frontend, tests on both sides).
+- **A JSONB column storing `NULL` is not the same as SQL `NULL`.** By default SQLAlchemy stores a
+  Python `None` in a `JSONB` column as the JSON scalar `null`, which made a `CHECK` constraint meant to
+  reject "multiple-choice without options" pass silently, since `options IS NOT NULL` is true for a
+  stored `null`. Fixed with `JSONB(none_as_null=True)`; caught by a test that inserts exactly that row
+  and expects the database to refuse it.
 
 ## Deployment (Neon + Render, both free)
 

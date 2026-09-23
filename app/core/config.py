@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     # --- Limits ---
     max_text_chars: int = Field(default=3000, gt=0)
     daily_analysis_limit: int = Field(default=10, gt=0)
+    daily_generation_limit: int = Field(default=5, gt=0)
     demo_daily_limit: int = Field(default=3, gt=0)
     # Number of reverse proxies in front of the API that append to X-Forwarded-For (0 = none).
     # Needed to see the visitor's IP instead of the proxy's (see app/core/rate_limit.py).

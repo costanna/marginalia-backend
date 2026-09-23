@@ -10,7 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from app.core.errors import AppError
 from app.db.models import UsageCounter, User
 from app.services import usage
-from app.services.usage import refund_analysis, reserve_analysis
+from app.services.usage import (
+    refund_analysis,
+    refund_generation,
+    reserve_analysis,
+    reserve_generation,
+)
 
 
 @pytest.fixture
@@ -118,3 +123,45 @@ async def test_concurrent_requests_cannot_exceed_the_limit(engine: AsyncEngine) 
     assert sum(outcomes) == 3
     async with maker() as check:
         assert await counter(check, user_id) == 3
+
+
+# --- Exercise generations: the same atomic reservation, a different column -------------------
+
+
+async def generation_counter(session: AsyncSession, user_id: uuid.UUID) -> int:
+    value = await session.scalar(
+        select(UsageCounter.generations_count).where(UsageCounter.user_id == user_id)
+    )
+    return value or 0
+
+
+async def test_generations_and_analyses_have_independent_allowances(session: AsyncSession) -> None:
+    user_id = await make_user(session)
+
+    await reserve_generation(session, user_id, limit=2)
+    await reserve_analysis(session, user_id, limit=5)
+
+    assert await generation_counter(session, user_id) == 1
+    assert await counter(session, user_id) == 1  # analyses_count untouched by the generation
+
+
+async def test_the_generation_limit_is_enforced_and_reported(session: AsyncSession) -> None:
+    user_id = await make_user(session)
+    await reserve_generation(session, user_id, limit=1)
+
+    with pytest.raises(AppError) as error:
+        await reserve_generation(session, user_id, limit=1)
+
+    assert error.value.code == "daily_quota_exceeded"
+    assert error.value.details == {"limit": 1}
+    assert await generation_counter(session, user_id) == 1  # the rejected attempt was not counted
+
+
+async def test_a_generation_refund_gives_it_back(session: AsyncSession) -> None:
+    user_id = await make_user(session)
+    day = await reserve_generation(session, user_id, limit=1)
+
+    await refund_generation(session, user_id, day)
+
+    assert await generation_counter(session, user_id) == 0
+    await reserve_generation(session, user_id, limit=1)  # available again

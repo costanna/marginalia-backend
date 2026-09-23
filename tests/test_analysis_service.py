@@ -40,6 +40,9 @@ class ScriptedClient:
             raise answer
         return answer
 
+    async def generate_exercises(self, **_: object) -> dict[str, Any]:
+        raise NotImplementedError  # unused here: only to satisfy the LLMClient protocol
+
 
 async def run_ask(client: ScriptedClient) -> Any:
     return await ask_llm(client, text=TEXT, ui_language=UiLanguage.EN, target_level=None)

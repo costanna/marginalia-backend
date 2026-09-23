@@ -5,7 +5,7 @@ from sqlalchemy import text as sql
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.services.usage import today
-from tests.helpers import analyze, register
+from tests.helpers import analyze, generate_exercises, register
 
 EXPORT = "/api/v1/me/export"
 
@@ -26,6 +26,8 @@ async def test_an_account_without_texts_exports_its_profile_and_empty_lists(
 
     assert body["profile"]["email"] == "ana@example.com"
     assert body["texts"] == []
+    assert body["exercises"] == []
+    assert body["exercise_attempts"] == []
     assert body["usage"] == []
     assert body["exported_at"]
 
@@ -49,6 +51,32 @@ async def test_export_contains_the_profile_every_text_with_corrections_and_the_u
     ]
 
 
+async def test_export_contains_every_exercise_with_its_answer_and_every_attempt(
+    client: AsyncClient,
+) -> None:
+    headers = await register(client)
+    await analyze(client, headers, text="I has teh book and a apple.")
+    exercises = await generate_exercises(client, headers)
+    assert "correct_answer" not in exercises[0]  # not revealed before an attempt
+    await client.post(
+        f"/api/v1/exercises/{exercises[0]['id']}/attempt",
+        headers=headers,
+        json={"user_answer": "x"},
+    )
+
+    body = (await client.get(EXPORT, headers=headers)).json()
+
+    assert len(body["exercises"]) == len(exercises)
+    exported = {item["id"]: item for item in body["exercises"]}
+    # Unlike GET /exercises, the export DOES reveal the answer: it is the user's own data dump.
+    assert all("correct_answer" in item and "explanation" in item for item in exported.values())
+    assert exported[exercises[0]["id"]]["status"] == "done"
+    [attempt] = body["exercise_attempts"]
+    assert attempt["exercise_id"] == exercises[0]["id"]
+    assert attempt["attempted_at"]
+    assert body["usage"][0]["generations_count"] == 1
+
+
 async def test_export_never_includes_secrets(client: AsyncClient) -> None:
     headers = await register(client)
     await analyze(client, headers)
@@ -66,6 +94,7 @@ async def test_export_only_contains_the_callers_own_data(client: AsyncClient) ->
     ben = await register(client, "ben@example.com")
     ana_text = await analyze(client, ana, title="ana's text")
     await analyze(client, ben, title="ben's text")
+    ana_exercises = await generate_exercises(client, ana)
 
     ana_export = (await client.get(EXPORT, headers=ana)).json()
     ben_export = (await client.get(EXPORT, headers=ben)).json()
@@ -75,6 +104,8 @@ async def test_export_only_contains_the_callers_own_data(client: AsyncClient) ->
     assert "ben" not in json.dumps(ana_export).lower()
     assert ben_export["profile"]["email"] == "ben@example.com"
     assert "ana's text" not in json.dumps(ben_export)
+    assert {item["id"] for item in ana_export["exercises"]} == {i["id"] for i in ana_exercises}
+    assert ben_export["exercises"] == []
 
 
 async def test_export_is_offered_as_a_file_download(
@@ -99,7 +130,14 @@ async def test_export_then_delete_leaves_nothing_behind(
     assert (await client.delete("/api/v1/me", headers=headers)).status_code == 204
 
     async with engine.connect() as conn:
-        for table in ("users", "texts", "corrections", "usage_counters"):
+        for table in (
+            "users",
+            "texts",
+            "corrections",
+            "usage_counters",
+            "exercises",
+            "exercise_attempts",
+        ):
             assert (await conn.execute(sql(f"SELECT count(*) FROM {table}"))).scalar_one() == 0
 
 

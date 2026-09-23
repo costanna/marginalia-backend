@@ -10,7 +10,7 @@ from app.core.config import get_settings
 from app.main import app
 from app.services.llm import get_llm_client
 from app.services.llm.base import LLMInvalidResponseError, LLMUnavailableError
-from tests.helpers import TEXT, analyze, register
+from tests.helpers import TEXT, analyze, generate_exercises, register
 
 ANALYZE = "/api/v1/texts/analyze"
 TEXTS = "/api/v1/texts"
@@ -342,14 +342,27 @@ async def test_delete_removes_the_text_and_its_corrections(
             assert (await conn.execute(sql(f"SELECT count(*) FROM {table}"))).scalar_one() == 0
 
 
-async def test_deleting_the_account_deletes_texts_and_usage(
+async def test_deleting_the_account_deletes_texts_exercises_and_usage(
     client: AsyncClient, engine: AsyncEngine
 ) -> None:
     headers = await register(client)
     await analyze(client, headers)
+    exercises = await generate_exercises(client, headers)
+    await client.post(
+        f"/api/v1/exercises/{exercises[0]['id']}/attempt",
+        headers=headers,
+        json={"user_answer": "x"},
+    )
 
     assert (await client.delete("/api/v1/me", headers=headers)).status_code == 204
 
     async with engine.connect() as conn:
-        for table in ("users", "texts", "corrections", "usage_counters"):
+        for table in (
+            "users",
+            "texts",
+            "corrections",
+            "usage_counters",
+            "exercises",
+            "exercise_attempts",
+        ):
             assert (await conn.execute(sql(f"SELECT count(*) FROM {table}"))).scalar_one() == 0

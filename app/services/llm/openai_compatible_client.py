@@ -15,8 +15,15 @@ from typing import Any
 import httpx
 
 from app.db.models import TargetLevel, UiLanguage
-from app.services.llm.base import LLMInvalidResponseError, LLMUnavailableError
-from app.services.llm.prompts import JSON_SHAPE_HINT, build_system_prompt, build_user_message
+from app.services.llm.base import LLMInvalidResponseError, LLMUnavailableError, RuleFailure
+from app.services.llm.prompts import (
+    JSON_SHAPE_HINT,
+    JSON_SHAPE_HINT_EXERCISES,
+    build_exercise_system_prompt,
+    build_exercise_user_message,
+    build_system_prompt,
+    build_user_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +102,27 @@ class OpenAICompatibleClient:
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": build_user_message(text)},
+            ],
+        }
+        response = await self._post_with_retries(payload)
+        return self._extract_answer(response)
+
+    async def generate_exercises(
+        self,
+        *,
+        rule_failures: list[RuleFailure],
+        ui_language: UiLanguage,
+        count: int,
+    ) -> dict[str, Any]:
+        system_prompt = build_exercise_system_prompt(ui_language, count) + JSON_SHAPE_HINT_EXERCISES
+        payload = {
+            "model": self.model_name,
+            "max_tokens": self._max_tokens,
+            "temperature": 0.4,  # a little higher than analysis: fresh sentences, not one answer
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": build_exercise_user_message(rule_failures)},
             ],
         }
         response = await self._post_with_retries(payload)
