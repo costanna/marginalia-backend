@@ -1,3 +1,5 @@
+import unicodedata
+
 import pytest
 
 from app.core.errors import AppError
@@ -198,6 +200,20 @@ def test_decomposed_input_matches_after_cleaning() -> None:
 
     assert located(raw, fix(composed, "coffee")) == []  # without cleaning the match fails...
     assert located(clean_text(raw), fix(composed, "coffee"))  # ...and NFC makes it work
+
+
+def test_a_decomposed_correction_still_matches_the_saved_composed_text() -> None:
+    # The saved text is always NFC (clean_text does that); a model can still answer with a
+    # decomposed form of the same letters ("e" + combining acute instead of "e" with the accent).
+    text = "I like café a lot."
+    decomposed_original = unicodedata.normalize("NFD", "café")
+    decomposed_suggestion = unicodedata.normalize("NFD", "coffee")
+
+    [item] = located(text, fix(decomposed_original, decomposed_suggestion))
+
+    assert text[item.start : item.end] == "café"
+    assert item.original == "café"  # stored composed, matching what the text itself contains
+    assert item.suggestion == "coffee"
 
 
 def test_offsets_always_slice_back_to_the_original_fragment() -> None:
