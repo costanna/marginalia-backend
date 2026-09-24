@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     daily_analysis_limit: int = Field(default=10, gt=0)
     daily_generation_limit: int = Field(default=5, gt=0)
     demo_daily_limit: int = Field(default=3, gt=0)
+    # A ceiling on every LLM call made by anyone, all users and the demo combined, per day: keeps
+    # a free-tier provider key (e.g. Groq's 1000 requests/day) from being exhausted by real usage
+    # before the day resets. Set comfortably under the provider's own limit.
+    daily_global_llm_limit: int = Field(default=900, gt=0)
     # Number of reverse proxies in front of the API that append to X-Forwarded-For (0 = none).
     # Needed to see the visitor's IP instead of the proxy's (see app/core/rate_limit.py).
     trusted_proxy_hops: int = Field(default=0, ge=0)

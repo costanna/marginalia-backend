@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 
 from app.core.errors import AppError
-from app.db.models import UsageCounter
+from app.db.models import GlobalUsageCounter, UsageCounter
 
 
 def today() -> date:
@@ -94,3 +94,33 @@ async def reserve_generation(session: AsyncSession, user_id: uuid.UUID, limit: i
 
 async def refund_generation(session: AsyncSession, user_id: uuid.UUID, day: date) -> None:
     await _refund(session, user_id, day, UsageCounter.generations_count)
+
+
+async def reserve_global_llm_call(session: AsyncSession, limit: int) -> None:
+    """Take one unit of today's shared provider allowance, across every user and the demo.
+
+    Same atomic INSERT .. ON CONFLICT .. WHERE technique as `_reserve`, keyed by day alone rather
+    than by user. There is no matching refund: reaching this point means a real call is about to
+    be made to the provider, which spends its quota whether or not the call then succeeds.
+    """
+    day = today()
+    statement = (
+        pg_insert(GlobalUsageCounter)
+        .values(day=day, llm_calls=1)
+        .on_conflict_do_update(
+            index_elements=[GlobalUsageCounter.day],
+            set_={"llm_calls": GlobalUsageCounter.llm_calls + 1},
+            where=GlobalUsageCounter.llm_calls < limit,
+        )
+        .returning(GlobalUsageCounter.llm_calls)
+    )
+    reserved = (await session.execute(statement)).scalar_one_or_none()
+    if reserved is None:
+        await session.rollback()
+        raise AppError(
+            code="llm_capacity_reached",
+            message="The AI service has reached its shared daily capacity.",
+            status_code=503,
+            details={"limit": limit},
+        )
+    await session.commit()

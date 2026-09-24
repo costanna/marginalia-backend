@@ -211,6 +211,17 @@ class UsageCounter(Base):
     generations_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
 
+class GlobalUsageCounter(Base):
+    """Every LLM call made by anyone, per day: caps the shared free-tier API key, independent of
+    (and in addition to) each user's own daily limit. Never refunded: an attempt that reached the
+    provider already spent real quota there, whether or not it then succeeded."""
+
+    __tablename__ = "global_usage_counters"
+
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    llm_calls: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+
 class Exercise(Base):
     """A practice item, generated from the rules a user fails most in their last 30 days."""
 

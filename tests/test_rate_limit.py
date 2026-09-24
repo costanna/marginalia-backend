@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from datetime import date
 from typing import Any
 
 import pytest
@@ -10,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from app.core.config import get_settings
 from app.core.rate_limit import client_ip
 from app.main import app
+from app.services import usage
 from tests.conftest import REGISTER_PAYLOAD
 from tests.helpers import TEXT
 
@@ -114,6 +116,25 @@ async def test_the_demo_saves_nothing(client: AsyncClient, engine: AsyncEngine) 
     async with engine.connect() as conn:
         for table in ("users", "texts", "corrections", "usage_counters"):
             assert (await conn.execute(sql(f"SELECT count(*) FROM {table}"))).scalar_one() == 0
+
+
+async def test_the_demo_respects_the_shared_global_capacity(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The per-IP demo limit and the per-user analysis limit are independent of the ONE shared
+    cap on real calls to the provider (see app/services/usage.py) — the demo must respect it too,
+    since it spends the exact same quota."""
+    monkeypatch.setattr(get_settings(), "daily_global_llm_limit", 1)
+    # A day of its own: the global counter is shared by every test that reserves one (including
+    # every other demo/analyze request in this file, all using the real today()).
+    monkeypatch.setattr(usage, "today", lambda: date(2099, 6, 6))
+
+    first = await client.post(DEMO, json={"text": TEXT})
+    second = await client.post(DEMO, json={"text": TEXT})
+
+    assert first.status_code == 200
+    assert second.status_code == 503
+    assert second.json()["error"]["code"] == "llm_capacity_reached"
 
 
 @pytest.mark.parametrize(

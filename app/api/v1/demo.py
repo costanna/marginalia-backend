@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Request
 
-from app.api.v1.deps import LLMClientDep, SettingsDep
+from app.api.v1.deps import LLMClientDep, SessionDep, SettingsDep
 from app.core.config import get_settings
 from app.core.rate_limit import limiter
 from app.schemas.texts import CorrectionBase, DemoAnalysisResponse, DemoAnalyzeRequest
 from app.services.analysis import analyze
+from app.services.usage import reserve_global_llm_call
 
 router = APIRouter(prefix="/demo", tags=["demo"])
 
@@ -18,8 +19,10 @@ async def demo_analyze(
     payload: DemoAnalyzeRequest,
     client: LLMClientDep,
     settings: SettingsDep,
+    session: SessionDep,
 ) -> DemoAnalysisResponse:
     """Try the corrector without an account. Nothing is saved."""
+    await reserve_global_llm_call(session, settings.daily_global_llm_limit)
     result = await analyze(
         client,
         text=payload.text,

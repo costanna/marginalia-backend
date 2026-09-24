@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from datetime import date
 from typing import Any
 
 import pytest
@@ -7,12 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.core.errors import AppError
 from app.db.models import AnalyzedText, TargetLevel, UiLanguage, UsageCounter, User
+from app.services import usage
 from app.services.analysis import analyze_and_save
 from app.services.llm.base import LLMInvalidResponseError, LLMUnavailableError
 from app.services.llm.fake_client import FakeLLMClient
 
 TEXT = "Yesterday I go to the cinema with my friends."
 LIMIT = 2
+GLOBAL_LIMIT = 1000  # generous: only the dedicated global-limit tests set it low
 
 
 class RecordingClient(FakeLLMClient):
@@ -53,7 +56,13 @@ async def user(session: AsyncSession) -> User:
     return new_user
 
 
-async def save(session: AsyncSession, user: User, client: Any, text: str = TEXT) -> AnalyzedText:
+async def save(
+    session: AsyncSession,
+    user: User,
+    client: Any,
+    text: str = TEXT,
+    global_limit: int = GLOBAL_LIMIT,
+) -> AnalyzedText:
     return await analyze_and_save(
         session,
         client,
@@ -63,6 +72,7 @@ async def save(session: AsyncSession, user: User, client: Any, text: str = TEXT)
         ui_language=UiLanguage.ES,
         max_chars=3000,
         daily_limit=LIMIT,
+        global_limit=global_limit,
     )
 
 
@@ -148,3 +158,21 @@ async def test_the_daily_limit_stops_the_analysis_before_calling_the_model(
     assert client.target_levels == []
     assert await stored_texts(session) == LIMIT
     assert await used(session) == LIMIT
+
+
+async def test_the_global_capacity_stops_the_analysis_and_refunds_the_users_allowance(
+    session: AsyncSession, user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A day of its own: the global counter is shared by every test that reserves one, so a real
+    # calendar day (like every other test here uses) would collide with all of them.
+    monkeypatch.setattr(usage, "today", lambda: date(2099, 1, 1))
+    await save(session, user, FakeLLMClient(), global_limit=1)  # spends the one shared slot
+    client = RecordingClient()
+
+    with pytest.raises(AppError) as raised:
+        await save(session, user, client, global_limit=1)
+
+    assert raised.value.code == "llm_capacity_reached"
+    assert client.target_levels == []  # the model was never called
+    assert await stored_texts(session) == 1
+    assert await used(session) == 1  # the user's own allowance was refunded, not spent twice

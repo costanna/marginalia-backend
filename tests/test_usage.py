@@ -8,13 +8,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.core.errors import AppError
-from app.db.models import UsageCounter, User
+from app.db.models import GlobalUsageCounter, UsageCounter, User
 from app.services import usage
 from app.services.usage import (
     refund_analysis,
     refund_generation,
     reserve_analysis,
     reserve_generation,
+    reserve_global_llm_call,
 )
 
 
@@ -165,3 +166,79 @@ async def test_a_generation_refund_gives_it_back(session: AsyncSession) -> None:
 
     assert await generation_counter(session, user_id) == 0
     await reserve_generation(session, user_id, limit=1)  # available again
+
+
+# --- reserve_global_llm_call: a shared, per-day cap across every user and the demo ------------
+
+
+async def global_calls(session: AsyncSession, day: date) -> int:
+    value = await session.scalar(
+        select(GlobalUsageCounter.llm_calls).where(GlobalUsageCounter.day == day)
+    )
+    return value or 0
+
+
+async def test_each_reservation_uses_one_shared_call(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(usage, "today", lambda: date(2099, 6, 1))
+
+    await reserve_global_llm_call(session, limit=3)
+    await reserve_global_llm_call(session, limit=3)
+
+    assert await global_calls(session, date(2099, 6, 1)) == 2
+
+
+async def test_the_limit_has_no_per_user_dimension_at_all(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unlike reserve_analysis/reserve_generation, this call takes no user_id: the cap is one
+    shared counter for the whole app, so two different users' calls exhaust the same allowance."""
+    monkeypatch.setattr(usage, "today", lambda: date(2099, 6, 2))
+    await make_user(session, "ana@example.com")
+    await make_user(session, "ben@example.com")
+
+    await reserve_global_llm_call(session, limit=2)  # "ana"'s request, conceptually
+    await reserve_global_llm_call(session, limit=2)  # "ben"'s
+
+    with pytest.raises(AppError) as error:
+        await reserve_global_llm_call(session, limit=2)  # a third request, either user's
+
+    assert error.value.code == "llm_capacity_reached"
+    assert error.value.status_code == 503
+    assert error.value.details == {"limit": 2}
+    assert await global_calls(session, date(2099, 6, 2)) == 2  # the rejected attempt uncounted
+
+
+async def test_a_new_day_starts_a_new_shared_allowance(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(usage, "today", lambda: date(2099, 6, 3))
+    await reserve_global_llm_call(session, limit=1)
+
+    monkeypatch.setattr(usage, "today", lambda: date(2099, 6, 4))
+    await reserve_global_llm_call(session, limit=1)  # must not raise
+
+    assert await global_calls(session, date(2099, 6, 3)) == 1
+    assert await global_calls(session, date(2099, 6, 4)) == 1
+
+
+async def test_concurrent_requests_cannot_exceed_the_shared_limit(
+    engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(usage, "today", lambda: date(2099, 6, 5))
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def attempt() -> bool:
+        async with maker() as own_session:  # each request has its own session, as in the API
+            try:
+                await reserve_global_llm_call(own_session, limit=3)
+            except AppError:
+                return False
+            return True
+
+    outcomes = await asyncio.gather(*(attempt() for _ in range(10)))
+
+    assert sum(outcomes) == 3
+    async with maker() as check:
+        assert await global_calls(check, date(2099, 6, 5)) == 3

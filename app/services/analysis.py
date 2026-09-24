@@ -31,7 +31,7 @@ from app.services.llm.base import (
     LLMInvalidResponseError,
     LLMUnavailableError,
 )
-from app.services.usage import refund_analysis, reserve_analysis
+from app.services.usage import refund_analysis, reserve_analysis, reserve_global_llm_call
 
 MIN_TEXT_CHARS = 20
 LLM_ATTEMPTS = 2  # the first call plus a single retry when the answer is unusable
@@ -234,11 +234,13 @@ async def analyze_and_save(
     ui_language: UiLanguage,
     max_chars: int,
     daily_limit: int,
+    global_limit: int,
 ) -> AnalyzedText:
     """Analyse a user's text, charge their daily allowance and store the result.
 
     The text is validated BEFORE reserving quota (a rejected text costs nothing) and the
-    reservation is refunded if anything fails afterwards.
+    per-user reservation is refunded if anything fails afterwards, including the shared daily
+    cap being reached (in which case the LLM was never called, so nothing else to refund).
     """
     cleaned = clean_text(text)
     validate_length(cleaned, max_chars)
@@ -246,6 +248,11 @@ async def analyze_and_save(
     user_id: uuid.UUID = user.id
     target_level = user.target_level
     charged_day: date = await reserve_analysis(session, user_id, daily_limit)
+    try:
+        await reserve_global_llm_call(session, global_limit)
+    except Exception:
+        await refund_analysis(session, user_id, charged_day)
+        raise
     try:
         result = await analyze(
             client,
