@@ -50,6 +50,7 @@ async def analyze_text(
         ui_language=payload.ui_language or user.ui_language,
         max_chars=settings.max_text_chars,
         daily_limit=settings.daily_analysis_limit,
+        global_limit=settings.daily_global_llm_limit,
     )
 
 

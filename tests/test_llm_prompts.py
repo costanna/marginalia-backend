@@ -13,7 +13,11 @@ from app.services.llm.prompts import (
 
 
 def test_system_prompt_asks_for_the_explanations_in_the_ui_language() -> None:
-    for language, name in ((UiLanguage.CA, "Catalan"), (UiLanguage.ES, "Spanish")):
+    for language, name in (
+        (UiLanguage.CA, "Catalan"),
+        (UiLanguage.ES, "Spanish"),
+        (UiLanguage.FR, "French"),
+    ):
         prompt = build_system_prompt(language, None)
 
         assert f"written in {name}" in prompt

@@ -24,7 +24,7 @@ from app.services.llm.base import (
     LLMUnavailableError,
     RuleFailure,
 )
-from app.services.usage import refund_generation, reserve_generation
+from app.services.usage import refund_generation, reserve_generation, reserve_global_llm_call
 
 # How many rules to build exercises for, and how many of the user's own mistakes to show the
 # model as grounding for each (spec: "las 3 reglas más falladas").
@@ -123,7 +123,7 @@ async def _ask_llm_for_exercises(
 
 
 async def generate_or_reuse(
-    session: AsyncSession, client: LLMClient, *, user: User, daily_limit: int
+    session: AsyncSession, client: LLMClient, *, user: User, daily_limit: int, global_limit: int
 ) -> list[Exercise]:
     """Return this user's pending exercises, generating a fresh batch only if none are left.
 
@@ -131,22 +131,32 @@ async def generate_or_reuse(
     build exercises from (an empty list, not an error: the practice screen then invites the user
     to write first).
     """
-    pending = await _pending_exercises(session, user.id)
+    # Captured once, up front: a commit or rollback expires the ORM object's attributes, and
+    # re-reading user.id afterwards would need an async lazy-load that a plain attribute access
+    # cannot perform (a real bug this used to have, surfaced by adding a second reservation step
+    # whose own rollback expires user before the except block below ever reads user.id).
+    user_id: uuid.UUID = user.id
+    pending = await _pending_exercises(session, user_id)
     if pending:
         return pending
 
-    rule_failures = await top_rule_failures(session, user.id)
+    rule_failures = await top_rule_failures(session, user_id)
     if not rule_failures:
         return []
 
-    charged_day = await reserve_generation(session, user.id, daily_limit)
+    charged_day = await reserve_generation(session, user_id, daily_limit)
+    try:
+        await reserve_global_llm_call(session, global_limit)
+    except Exception:
+        await refund_generation(session, user_id, charged_day)
+        raise
     try:
         answer = await _ask_llm_for_exercises(
             client, rule_failures=rule_failures, user=user, count=EXERCISES_PER_GENERATION
         )
         exercises = [
             Exercise(
-                user_id=user.id,
+                user_id=user_id,
                 rule_tag=item.rule_tag,
                 type=item.type,
                 prompt=item.prompt,
@@ -163,7 +173,7 @@ async def generate_or_reuse(
             await session.refresh(exercise, attribute_names=["created_at"])
     except Exception:
         await session.rollback()
-        await refund_generation(session, user.id, charged_day)
+        await refund_generation(session, user_id, charged_day)
         raise
     return exercises
 

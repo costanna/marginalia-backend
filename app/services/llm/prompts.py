@@ -8,6 +8,7 @@ LANGUAGE_NAMES: dict[UiLanguage, str] = {
     UiLanguage.CA: "Catalan",
     UiLanguage.ES: "Spanish",
     UiLanguage.EN: "English",
+    UiLanguage.FR: "French",
 }
 
 SYSTEM_PROMPT = """\

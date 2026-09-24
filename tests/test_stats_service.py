@@ -15,7 +15,10 @@ from app.db.models import (
 )
 from app.services.stats import errors_by_category, overview, progress, top_rules
 
-NOW = datetime(2026, 9, 22, 12, 0, tzinfo=UTC)
+# Anchored to the real clock, not a fixed date: `overview()` compares against
+# `datetime.now(UTC)` internally (streak_days especially needs "today" to really be today), so a
+# hardcoded NOW would start failing streak_days assertions the day after it was written.
+NOW = datetime.now(UTC).replace(hour=12, minute=0, second=0, microsecond=0)
 
 
 @pytest.fixture

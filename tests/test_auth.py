@@ -56,7 +56,7 @@ async def test_register_rejects_a_short_password(client: AsyncClient) -> None:
 
 async def test_register_rejects_an_invalid_email_and_unknown_language(client: AsyncClient) -> None:
     bad_email = await client.post(REGISTER_URL, json={**REGISTER_PAYLOAD, "email": "not-an-email"})
-    bad_lang = await client.post(REGISTER_URL, json={**REGISTER_PAYLOAD, "ui_language": "fr"})
+    bad_lang = await client.post(REGISTER_URL, json={**REGISTER_PAYLOAD, "ui_language": "de"})
 
     assert bad_email.status_code == 422
     assert bad_lang.status_code == 422
@@ -70,6 +70,17 @@ async def test_register_defaults_the_language_to_spanish(
 
     me = await client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
     assert me.json()["ui_language"] == "es"
+
+
+async def test_register_accepts_french(client: AsyncClient) -> None:
+    payload = {**REGISTER_PAYLOAD, "ui_language": "fr"}
+    response = await client.post(REGISTER_URL, json=payload)
+    token = response.json()["access_token"]
+
+    me = await client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 201
+    assert me.json()["ui_language"] == "fr"
 
 
 async def test_login_with_correct_credentials(client: AsyncClient) -> None:

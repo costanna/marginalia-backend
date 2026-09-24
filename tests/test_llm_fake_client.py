@@ -32,10 +32,12 @@ async def test_explanation_and_summary_follow_the_ui_language() -> None:
     text = "Yesterday I go home."
     ca = await analyze(text, UiLanguage.CA)
     es = await analyze(text, UiLanguage.ES)
+    fr = await analyze(text, UiLanguage.FR)
 
     assert "passat simple" in ca.corrections[0].explanation
     assert "pasado simple" in es.corrections[0].explanation
-    assert ca.summary != es.summary
+    assert "passé simple" in fr.corrections[0].explanation
+    assert len({ca.summary, es.summary, fr.summary}) == 3
 
 
 async def test_it_is_deterministic() -> None:
@@ -113,9 +115,11 @@ async def test_explanation_follows_the_ui_language() -> None:
 
     ca = await generate(failures, count=1, language=UiLanguage.CA)
     es = await generate(failures, count=1, language=UiLanguage.ES)
+    fr = await generate(failures, count=1, language=UiLanguage.FR)
 
     assert "passat simple" in ca.exercises[0].explanation
     assert "pasado simple" in es.exercises[0].explanation
+    assert "passé simple" in fr.exercises[0].explanation
 
 
 async def test_generate_exercises_is_deterministic() -> None:

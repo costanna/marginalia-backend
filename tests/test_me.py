@@ -75,7 +75,7 @@ async def test_patch_me_validates_input(client: AsyncClient, auth_headers: dict[
     for bad_body in (
         {"target_level": "A1"},  # A1 is not a valid target
         {"theme_preference": "blue"},
-        {"ui_language": "fr"},
+        {"ui_language": "de"},
         {"display_name": "   "},
         {"email": "other@example.com"},  # email is not editable
         {"password": "another-password"},  # password is not editable here

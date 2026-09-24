@@ -1,7 +1,7 @@
 import asyncio
 import uuid
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -22,6 +22,7 @@ from app.db.models import (
     UsageCounter,
     User,
 )
+from app.services import usage
 from app.services.exercises import (
     ALREADY_ATTEMPTED,
     attempt,
@@ -31,8 +32,12 @@ from app.services.exercises import (
 from app.services.llm.base import LLMInvalidResponseError, LLMUnavailableError
 from app.services.llm.fake_client import FakeLLMClient
 
-NOW = datetime(2026, 9, 22, 12, 0, tzinfo=UTC)
+# Anchored to the real clock, not a fixed date: top_rule_failures compares against
+# datetime.now(UTC) internally (a 30-day lookback), so a hardcoded NOW would eventually drift
+# outside that window and start silently finding no rule failures.
+NOW = datetime.now(UTC).replace(hour=12, minute=0, second=0, microsecond=0)
 LIMIT = 5
+GLOBAL_LIMIT = 1000  # generous: only the dedicated global-limit test sets it low
 
 
 @pytest.fixture
@@ -235,7 +240,9 @@ async def test_generates_nothing_and_spends_no_quota_without_recent_history(
 ) -> None:
     client = RecordingClient()
 
-    result = await generate_or_reuse(session, client, user=user, daily_limit=LIMIT)
+    result = await generate_or_reuse(
+        session, client, user=user, daily_limit=LIMIT, global_limit=GLOBAL_LIMIT
+    )
 
     assert result == []
     assert client.calls == []
@@ -248,7 +255,9 @@ async def test_generates_a_fresh_batch_from_the_users_history(
     await add_correction(session, user, RuleTag.VERB_TENSE)
     client = RecordingClient()
 
-    result = await generate_or_reuse(session, client, user=user, daily_limit=LIMIT)
+    result = await generate_or_reuse(
+        session, client, user=user, daily_limit=LIMIT, global_limit=GLOBAL_LIMIT
+    )
 
     assert len(result) > 0
     assert all(item.status is ExerciseStatus.PENDING for item in result)
@@ -263,9 +272,13 @@ async def test_reuses_pending_exercises_without_calling_the_model_again(
 ) -> None:
     await add_correction(session, user, RuleTag.VERB_TENSE)
     client = RecordingClient()
-    first = await generate_or_reuse(session, client, user=user, daily_limit=LIMIT)
+    first = await generate_or_reuse(
+        session, client, user=user, daily_limit=LIMIT, global_limit=GLOBAL_LIMIT
+    )
 
-    second = await generate_or_reuse(session, client, user=user, daily_limit=LIMIT)
+    second = await generate_or_reuse(
+        session, client, user=user, daily_limit=LIMIT, global_limit=GLOBAL_LIMIT
+    )
 
     assert [item.id for item in second] == [item.id for item in first]
     assert len(client.calls) == 1  # the model was asked only once
@@ -277,13 +290,17 @@ async def test_a_fresh_batch_is_generated_once_the_previous_one_is_all_done(
 ) -> None:
     await add_correction(session, user, RuleTag.VERB_TENSE)
     client = RecordingClient()
-    first = await generate_or_reuse(session, client, user=user, daily_limit=LIMIT)
+    first = await generate_or_reuse(
+        session, client, user=user, daily_limit=LIMIT, global_limit=GLOBAL_LIMIT
+    )
     for exercise in first:
         await attempt(
             session, user_id=user.id, exercise_id=exercise.id, user_answer=exercise.correct_answer
         )
 
-    second = await generate_or_reuse(session, client, user=user, daily_limit=LIMIT)
+    second = await generate_or_reuse(
+        session, client, user=user, daily_limit=LIMIT, global_limit=GLOBAL_LIMIT
+    )
 
     assert {item.id for item in second}.isdisjoint({item.id for item in first})
     assert len(client.calls) == 2
@@ -293,17 +310,44 @@ async def test_a_fresh_batch_is_generated_once_the_previous_one_is_all_done(
 async def test_the_daily_generation_limit_is_enforced(session: AsyncSession, user: User) -> None:
     await add_correction(session, user, RuleTag.VERB_TENSE)
     client = RecordingClient()
-    first = await generate_or_reuse(session, client, user=user, daily_limit=1)
+    first = await generate_or_reuse(
+        session, client, user=user, daily_limit=1, global_limit=GLOBAL_LIMIT
+    )
     for exercise in first:
         await attempt(
             session, user_id=user.id, exercise_id=exercise.id, user_answer=exercise.correct_answer
         )
 
     with pytest.raises(AppError) as raised:
-        await generate_or_reuse(session, client, user=user, daily_limit=1)
+        await generate_or_reuse(
+            session, client, user=user, daily_limit=1, global_limit=GLOBAL_LIMIT
+        )
 
     assert raised.value.code == "daily_quota_exceeded"
     assert len(client.calls) == 1  # the model was never asked a second time
+
+
+async def test_the_global_capacity_stops_generation_and_refunds_the_users_allowance(
+    session: AsyncSession, user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A day of its own: the global counter is shared by every test that reserves one, so a real
+    # calendar day (like every other test here uses) would collide with all of them.
+    monkeypatch.setattr(usage, "today", lambda: date(2099, 1, 2))
+    user_id = user.id  # captured once: the expected error below rolls back and expires `user`
+    await add_correction(session, user, RuleTag.VERB_TENSE)
+    client = RecordingClient()
+    first = await generate_or_reuse(session, client, user=user, daily_limit=LIMIT, global_limit=1)
+    for exercise in first:
+        await attempt(
+            session, user_id=user_id, exercise_id=exercise.id, user_answer=exercise.correct_answer
+        )
+
+    with pytest.raises(AppError) as raised:
+        await generate_or_reuse(session, client, user=user, daily_limit=LIMIT, global_limit=1)
+
+    assert raised.value.code == "llm_capacity_reached"
+    assert len(client.calls) == 1  # the model was never asked a second time
+    assert await generation_counter(session, user_id) == 1  # refunded, not spent twice
 
 
 @pytest.mark.parametrize(
@@ -319,14 +363,18 @@ async def test_a_failed_generation_is_refunded_and_nothing_is_saved(
     await add_correction(session, user, RuleTag.VERB_TENSE)
 
     with pytest.raises(AppError) as raised:
-        await generate_or_reuse(session, FailingClient(error), user=user, daily_limit=LIMIT)
+        await generate_or_reuse(
+            session, FailingClient(error), user=user, daily_limit=LIMIT, global_limit=GLOBAL_LIMIT
+        )
 
     assert raised.value.code == code
     assert await generation_counter(session, user.id) == 0
     assert await exercise_count(session) == 0
 
     # the refund actually restored the allowance: a real client can still generate afterwards
-    result = await generate_or_reuse(session, RecordingClient(), user=user, daily_limit=1)
+    result = await generate_or_reuse(
+        session, RecordingClient(), user=user, daily_limit=1, global_limit=GLOBAL_LIMIT
+    )
     assert len(result) > 0
 
 
@@ -347,7 +395,9 @@ async def test_an_empty_answer_is_schema_valid_but_still_retried_once(
     await add_correction(session, user, RuleTag.VERB_TENSE)
     client = ScriptedClient({"exercises": []}, {"exercises": [VALID_EXERCISE]})
 
-    result = await generate_or_reuse(session, client, user=user, daily_limit=LIMIT)
+    result = await generate_or_reuse(
+        session, client, user=user, daily_limit=LIMIT, global_limit=GLOBAL_LIMIT
+    )
 
     assert len(result) == 1
     assert client.calls == 2
@@ -361,7 +411,9 @@ async def test_two_empty_answers_in_a_row_is_llm_invalid_response(
     client = ScriptedClient({"exercises": []}, {"exercises": []})
 
     with pytest.raises(AppError) as raised:
-        await generate_or_reuse(session, client, user=user, daily_limit=LIMIT)
+        await generate_or_reuse(
+            session, client, user=user, daily_limit=LIMIT, global_limit=GLOBAL_LIMIT
+        )
 
     assert raised.value.code == "llm_invalid_response"
     assert client.calls == 2
@@ -375,7 +427,9 @@ async def test_two_empty_answers_in_a_row_is_llm_invalid_response(
 async def make_exercise(session: AsyncSession, user: User) -> Exercise:
     """One pending exercise: a whole batch is generated, only the first is returned."""
     await add_correction(session, user, RuleTag.VERB_TENSE)
-    batch = await generate_or_reuse(session, FakeLLMClient(), user=user, daily_limit=LIMIT)
+    batch = await generate_or_reuse(
+        session, FakeLLMClient(), user=user, daily_limit=LIMIT, global_limit=GLOBAL_LIMIT
+    )
     return batch[0]
 
 
@@ -474,7 +528,9 @@ async def test_two_truly_concurrent_attempts_on_the_same_exercise_leave_exactly_
         setup.add(user)
         await setup.flush()
         await add_correction(setup, user, RuleTag.VERB_TENSE)
-        batch = await generate_or_reuse(setup, FakeLLMClient(), user=user, daily_limit=LIMIT)
+        batch = await generate_or_reuse(
+            setup, FakeLLMClient(), user=user, daily_limit=LIMIT, global_limit=GLOBAL_LIMIT
+        )
         user_id, exercise_id = user.id, batch[0].id
 
     async def try_attempt() -> str:

@@ -5,7 +5,8 @@
 REST API for **Marginalia**, an AI-powered English corrector that annotates a learner's text like a
 teacher's margin notes, estimates the CEFR level and builds personalised exercises.
 
-> Status: **Phase 7 (progress statistics)** done. Deployment polish (Phase 8) is next.
+> Status: **Phase 9 (portfolio polish)**. All planned phases (0-9) are done; the interface now also
+> supports French alongside Catalan, Spanish and English.
 
 Frontend: [marginalia-frontend](https://github.com/costanna/marginalia-frontend)
 
@@ -138,6 +139,18 @@ A test fails if a model changes without its migration.
 - **Daily quota is reserved atomically** (`INSERT .. ON CONFLICT DO UPDATE .. WHERE count < limit`)
   *before* calling the LLM and refunded if the analysis fails, so concurrent requests cannot exceed the
   limit and a failed analysis costs nothing.
+- **A second, shared cap (`DAILY_GLOBAL_LLM_LIMIT`) protects the free-tier provider key itself**,
+  on top of each user's own limit: one atomic counter for the whole app (every user and the demo
+  combined), reserved the same way, checked right after the per-user reservation and right before
+  the actual provider call. It is never refunded — reaching the provider spends its quota whether
+  or not the call then succeeds, unlike a per-user reservation the learner should not pay for.
+  Reaching it answers `503 llm_capacity_reached` rather than blaming the visitor's own limit.
+  Building it surfaced a real, separate bug: `generate_or_reuse`'s exception handlers read
+  `user.id` *after* a rollback, which expires that attribute on `AsyncSession` (`expire_on_commit`
+  only governs commits, never rollbacks) and needs an async reload a bare attribute access cannot
+  perform — a `MissingGreenlet` crash, latent since the function's original except blocks already
+  did this, just never exercised a failure path in a way that hit it. Fixed by capturing `user_id`
+  once, before any reservation, exactly like `analyze_and_save` already did.
 - **A provider only transports; the service validates.** "Invalid answer, retry once" lives in one place
   and works the same for every provider (real or fake).
 - **Prompt-injection defence:** the learner's text is wrapped in `<user_text>` tags and a literal
@@ -196,7 +209,13 @@ A test fails if a model changes without its migration.
 - **A model's multiple-choice options are deduplicated and trimmed** before validation (a repeated
   distractor or padding whitespace is common); `correct_answer` is compared and stored the same way,
   so "an" and " an " count as the same choice.
-
+- **`UiLanguage` is a CHECK constraint, not a native Postgres enum** (see `_text_enum` in
+  `db/models.py`), specifically so adding French later was one migration that drops and recreates two
+  CHECK constraints (`ui_language` on `users`, `ui_language_used` on `texts`) with the wider value
+  list — no `ALTER TYPE ... ADD VALUE` (which cannot run inside a transaction on older Postgres and
+  can never remove a value again). The fake LLM client's per-rule explanations, its exercise
+  templates and the real providers' `LANGUAGE_NAMES` map all had to grow a fourth entry too; nothing
+  enumerates "the three languages" anywhere else in the backend.
 
 ## Deployment (Neon + Render, both free)
 

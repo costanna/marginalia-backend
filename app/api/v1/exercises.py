@@ -20,7 +20,11 @@ async def generate_exercises(
 ) -> list[Exercise]:
     """Generate fresh exercises from the rules the user fails most, or hand back pending ones."""
     return await generate_or_reuse(
-        session, client, user=user, daily_limit=settings.daily_generation_limit
+        session,
+        client,
+        user=user,
+        daily_limit=settings.daily_generation_limit,
+        global_limit=settings.daily_global_llm_limit,
     )
 
 
