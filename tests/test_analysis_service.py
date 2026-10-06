@@ -1,3 +1,4 @@
+import logging
 from typing import Any
 
 import pytest
@@ -95,6 +96,28 @@ async def test_an_unavailable_provider_is_not_retried() -> None:
     assert error.value.code == "llm_unavailable"
     assert error.value.status_code == 503
     assert client.calls == 1
+
+
+async def test_an_unexpected_client_error_is_unavailable_not_a_500(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An SDK bug or unmapped transport error must not escape as internal_error: the call failed,
+    so the answer is 503, with the traceback kept in the server logs for us."""
+    client = ScriptedClient(RuntimeError("sdk exploded"))
+
+    with (
+        caplog.at_level(logging.ERROR, logger="app.services.analysis"),
+        pytest.raises(AppError) as error,
+    ):
+        await run_ask(client)
+
+    assert error.value.code == "llm_unavailable"
+    assert error.value.status_code == 503
+    assert client.calls == 1  # not retried: only unusable answers are
+    # The failure is visible server-side (type + traceback), while the client only gets the
+    # static 503 message: the exception text itself can hold the learner's words.
+    assert "RuntimeError" in caplog.text
+    assert "LLM call failed unexpectedly" in caplog.text
 
 
 async def test_analyze_produces_the_documented_result() -> None:

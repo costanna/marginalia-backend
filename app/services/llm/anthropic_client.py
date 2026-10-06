@@ -32,11 +32,17 @@ class AnthropicClient:
     ) -> None:
         self.model_name = model
         self._max_tokens = max_tokens
+        self._owns_client = client is None
         # The SDK itself retries connection errors, 408, 409, 429 and 5xx with exponential
         # backoff (max_retries), which is exactly "retry only transient errors".
         self._client = client or anthropic.AsyncAnthropic(
             api_key=api_key, timeout=timeout_seconds, max_retries=2
         )
+
+    async def aclose(self) -> None:
+        """Release the SDK's connection pool. An injected client belongs to its creator."""
+        if self._owns_client:
+            await self._client.close()
 
     async def analyze_text(
         self,

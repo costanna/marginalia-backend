@@ -1,5 +1,6 @@
 import uuid
 from datetime import UTC, datetime, timedelta
+from functools import lru_cache
 
 import jwt
 from argon2 import PasswordHasher
@@ -12,13 +13,22 @@ JWT_ALGORITHM = "HS256"
 # argon2-cffi defaults to Argon2id with sensible cost parameters.
 _hasher = PasswordHasher()
 
-# Verified against when the email is unknown, so "unknown email" and "wrong password"
-# take about the same time and cannot be told apart by timing.
-_DUMMY_HASH = _hasher.hash("marginalia-dummy-password")
-
 
 class InvalidTokenError(Exception):
     """The token is malformed, tampered with, expired or has no valid subject."""
+
+
+@lru_cache(maxsize=1)
+def _dummy_hash() -> str:
+    """A hash to verify against when the email is unknown, so "unknown email" and "wrong password"
+    take about the same time and cannot be told apart by timing.
+
+    Built on first use rather than at import time: an Argon2id hash costs real CPU, and importing
+    this module must not tax everything that only wants `create_access_token` (the test suite, the
+    migrations, ...). `lru_cache` keeps it a single hash per process, which is also what makes the
+    timing comparison meaningful.
+    """
+    return _hasher.hash("marginalia-dummy-password")
 
 
 def hash_password(password: str) -> str:
@@ -28,7 +38,8 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, password_hash: str | None) -> bool:
     """Check a password. Pass None when the user does not exist to keep timing uniform."""
     try:
-        return _hasher.verify(password_hash or _DUMMY_HASH, password) and password_hash is not None
+        stored = password_hash or _dummy_hash()
+        return _hasher.verify(stored, password) and password_hash is not None
     except (VerificationError, InvalidHashError):
         return False
 

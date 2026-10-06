@@ -13,6 +13,11 @@ from app.services.exercises import generate_or_reuse
 
 router = APIRouter(prefix="/exercises", tags=["exercises"])
 
+# Unlike texts (paged), exercises are consumed as one working set by the practice screen, so the
+# list keeps its shape and only gains an upper bound: 200 is 33 untouched generations.
+DEFAULT_LIST_LIMIT = 200
+MAX_LIST_LIMIT = 500
+
 
 @router.post("/generate", response_model=list[ExerciseRead])
 async def generate_exercises(
@@ -33,13 +38,14 @@ async def list_exercises(
     user: CurrentUser,
     session: SessionDep,
     status: Annotated[ExerciseStatus | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_LIST_LIMIT)] = DEFAULT_LIST_LIMIT,
 ) -> list[Exercise]:
     """The user's exercises, oldest first (the order a practice session works through them)."""
     conditions = [Exercise.user_id == user.id]
     if status is not None:
         conditions.append(Exercise.status == status)
     result = await session.scalars(
-        select(Exercise).where(*conditions).order_by(Exercise.created_at)
+        select(Exercise).where(*conditions).order_by(Exercise.created_at).limit(limit)
     )
     return list(result)
 

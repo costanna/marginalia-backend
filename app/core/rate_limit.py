@@ -28,4 +28,11 @@ def client_ip(request: Request) -> str:
 
 # In-memory storage: counters live in this process and reset on restart. That is enough for a
 # single-instance deployment; several instances would need a shared store such as Redis.
+#
+# Deliberately NOT the line that protects the budget: every path that reaches a provider call first
+# goes through `reserve_global_llm_call` (and, for a signed-in learner, `reserve_analysis`), both of
+# which are enforced by the database and therefore hold across restarts, processes and instances.
+# So losing this counter on deploy or scaling out can only make the per-IP throttle *softer* for a
+# moment — it can never turn into unbounded spend, and it never touches money-critical limits.
+# Self-hosted Redis (free) would be the upgrade if per-IP fairness across instances ever mattered.
 limiter = Limiter(key_func=client_ip, storage_uri="memory://")

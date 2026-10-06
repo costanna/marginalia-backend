@@ -50,10 +50,9 @@ def make_text(user: User, *, corrections: int = 2) -> AnalyzedText:
     )
 
 
-def make_exercise(user: User, *, source_text_id: object = None) -> Exercise:
+def make_exercise(user: User) -> Exercise:
     return Exercise(
         user_id=user.id,
-        source_text_id=source_text_id,
         rule_tag=RuleTag.VERB_TENSE,
         type=ExerciseType.FILL_BLANK,
         prompt="Yesterday I ___ home.",
@@ -176,28 +175,6 @@ async def test_a_new_counter_starts_at_zero(engine: AsyncEngine) -> None:
 
 
 # --- Exercises and attempts -------------------------------------------------------------------
-
-
-async def test_deleting_the_source_text_keeps_the_exercise_but_clears_the_reference(
-    engine: AsyncEngine,
-) -> None:
-    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-        user = make_user()
-        session.add(user)
-        await session.flush()
-        source = make_text(user, corrections=1)
-        session.add(source)
-        await session.flush()
-        session.add(make_exercise(user, source_text_id=source.id))
-        await session.commit()
-
-        await session.delete(source)
-        await session.commit()
-
-    async with async_sessionmaker(engine)() as session:
-        exercise = await session.scalar(select(Exercise))
-        assert exercise is not None
-        assert exercise.source_text_id is None
 
 
 async def test_deleting_an_exercise_deletes_its_attempt_but_not_the_user(

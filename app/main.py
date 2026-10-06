@@ -1,3 +1,6 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -5,11 +8,19 @@ from app.api.v1 import auth, demo, diagnostics, exercises, health, me, stats, te
 from app.core.config import get_settings
 from app.core.errors import register_exception_handlers
 from app.core.rate_limit import limiter
+from app.services.llm import aclose_llm_client
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    yield
+    # The cached LLM client holds an httpx pool; without this it warns and leaks per deploy.
+    await aclose_llm_client()
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    app = FastAPI(title="Marginalia API", version="0.1.0")
+    app = FastAPI(title="Marginalia API", version="0.1.0", lifespan=lifespan)
 
     app.add_middleware(
         CORSMiddleware,

@@ -62,6 +62,30 @@ async def call(client: OpenAICompatibleClient, text: str = "Hello world.") -> di
     )
 
 
+async def test_aclose_closes_an_owned_client() -> None:
+    owned = OpenAICompatibleClient(
+        base_url="https://llm.example.com/v1/",
+        api_key=API_KEY,
+        model="some-model",
+        timeout_seconds=30,
+        max_tokens=999,
+    )
+
+    await owned.aclose()
+
+    assert owned._http.is_closed
+
+
+async def test_aclose_leaves_an_injected_client_to_its_owner() -> None:
+    provider = Provider(ok())
+    client = provider.client()
+
+    await client.aclose()
+
+    assert not client._http.is_closed
+    assert await call(client) == ANSWER  # still usable afterwards
+
+
 # --- The request --------------------------------------------------------------------------------
 
 

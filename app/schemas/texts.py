@@ -4,11 +4,8 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
+from app.core.config import MAX_REQUEST_TEXT_CHARS
 from app.db.models import Category, CefrLevel, RuleTag, UiLanguage
-
-# Hard cap on the raw request body. The real, configurable limit (MAX_TEXT_CHARS) is applied after
-# cleaning and reported as text_too_long; this only stops absurdly large payloads early.
-MAX_REQUEST_TEXT_CHARS = 20_000
 
 Title = Annotated[str, StringConstraints(strip_whitespace=True, max_length=200)]
 

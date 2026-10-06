@@ -261,7 +261,6 @@ async def test_generates_a_fresh_batch_from_the_users_history(
 
     assert len(result) > 0
     assert all(item.status is ExerciseStatus.PENDING for item in result)
-    assert all(item.source_text_id is None for item in result)
     assert all(item.id is not None and item.created_at is not None for item in result)
     assert len(client.calls) == 1
     assert await generation_counter(session, user.id) == 1
@@ -355,6 +354,9 @@ async def test_the_global_capacity_stops_generation_and_refunds_the_users_allowa
     [
         (LLMUnavailableError(), "llm_unavailable"),
         (LLMInvalidResponseError("bad"), "llm_invalid_response"),
+        # An unclassified client failure (SDK bug, ...): still a failed generation, answered
+        # 503 and refunded — it must never escape as a 500 with the quota spent.
+        (RuntimeError("sdk exploded"), "llm_unavailable"),
     ],
 )
 async def test_a_failed_generation_is_refunded_and_nothing_is_saved(

@@ -2,6 +2,13 @@
 
 Tests run against `<DATABASE_URL database>_test`, created on demand, so development data is
 never touched. In CI, DATABASE_URL points to the PostgreSQL service container.
+
+Two kinds of test live side by side:
+
+* the PURE ones (validators, prompts, statistics maths, config, clients) need nothing but the
+  interpreter, and are what you run in the edit-run-fix loop;
+* the DATABASE ones ask for `engine` / `client` / `session`, which pull in `migrated_database`
+  and therefore a running PostgreSQL. Without one they are skipped with the command to fix it.
 """
 
 import asyncio
@@ -79,9 +86,54 @@ def _create_test_database_if_missing() -> None:
             conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(_test_db_name)))
 
 
-@pytest.fixture(scope="session", autouse=True)
+# Reason PostgreSQL was found to be down, or None when it has not been probed (or answered).
+# Cached so a machine without a database pays the connection timeout once, not once per test.
+_database_down: str | None = None
+
+
+def _probe_database() -> str | None:
+    """Return None when PostgreSQL answers, otherwise a message explaining the skip."""
+    global _database_down
+    if _database_down is not None:
+        return _database_down
+
+    admin_url = _dev_url.set(drivername="postgresql", database="postgres")
+    try:
+        with psycopg.connect(
+            admin_url.render_as_string(hide_password=False),
+            connect_timeout=3,
+            autocommit=True,
+        ) as conn:
+            conn.execute("SELECT 1")
+    except psycopg.OperationalError as exc:
+        # psycopg's message spans several lines (one per attempted address); the first is enough.
+        detail = str(exc).splitlines()[0]
+        _database_down = (
+            f"PostgreSQL is not reachable at {_dev_url.host}:{_dev_url.port} "
+            f"(start it with `docker compose up -d db`): {detail}"
+        )
+        return _database_down
+    return None
+
+
+@pytest.fixture(scope="session")
 def migrated_database() -> Iterator[None]:
-    """Build the schema from scratch with the real migrations (this also tests them)."""
+    """Build the schema from scratch with the real migrations (this also tests them).
+
+    Session-scoped but deliberately NOT autouse: it is requested by `engine`, so only the tests
+    that actually talk to the database run it. The pure ones (validators, prompts, statistics
+    maths, config) then run on any machine, with no server at all — which is what makes this
+    suite usable inside a tight edit-run-fix loop instead of only in CI.
+
+    When PostgreSQL is down, the database-backed tests are SKIPPED with the command that fixes
+    it. In CI a missing database is a broken job, not a reason to go green, so there it fails.
+    """
+    reason = _probe_database()
+    if reason is not None:
+        if os.environ.get("CI"):
+            pytest.fail(reason, pytrace=False)
+        pytest.skip(reason)
+
     _create_test_database_if_missing()
     config = Config(str(ALEMBIC_INI))
     command.downgrade(config, "base")
@@ -96,14 +148,19 @@ def reset_rate_limits() -> None:
 
 
 @pytest.fixture
-async def engine() -> AsyncIterator[AsyncEngine]:
+async def engine(migrated_database: Iterator[None]) -> AsyncIterator[AsyncEngine]:
+    # `migrated_database` is what ties the whole database-backed group to a real schema; asking
+    # for `engine` (or anything built on it) is enough to opt in.
     # NullPool: every test gets fresh connections bound to its own event loop.
     test_engine = create_async_engine(
         TEST_DATABASE_URL, poolclass=NullPool, connect_args={"prepare_threshold": None}
     )
     yield test_engine
     async with test_engine.begin() as conn:
-        await conn.execute(text("TRUNCATE users CASCADE"))
+        # global_usage_counters has no user FK, so CASCADE from users would never reach it: without
+        # this, the shared daily LLM quota accumulates across the whole session and a new test can
+        # push it over the limit for no visible reason.
+        await conn.execute(text("TRUNCATE users, global_usage_counters CASCADE"))
     await test_engine.dispose()
 
 

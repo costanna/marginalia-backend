@@ -155,6 +155,29 @@ async def test_the_demo_validates_its_input(
     assert response.json()["error"]["code"] == code
 
 
+async def _shared_capacity_used(engine: AsyncEngine) -> int:
+    query = sql("SELECT coalesce(sum(llm_calls), 0) FROM global_usage_counters")
+    async with engine.connect() as conn:
+        return int((await conn.execute(query)).scalar_one())
+
+
+async def test_a_rejected_demo_text_spends_no_shared_capacity(
+    client: AsyncClient, engine: AsyncEngine
+) -> None:
+    """A text the app itself refuses must not consume the shared daily capacity.
+
+    The demo used to reserve a unit of it before checking the length, so every oversized request
+    quietly shortened everyone's day for a call that never happened.
+    """
+    before = await _shared_capacity_used(engine)
+
+    response = await client.post(DEMO, json={"text": "x" * 3001})
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "text_too_long"
+    assert await _shared_capacity_used(engine) == before
+
+
 async def test_the_demo_is_limited_per_day_per_ip(
     client: AsyncClient, client_from: Callable[[str], AsyncClient]
 ) -> None:

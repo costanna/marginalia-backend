@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.core.config import Settings
+from app.core.config import MAX_REQUEST_TEXT_CHARS, Settings
 
 VALID_SECRET = "x" * 40
 DB_URL = "postgresql+psycopg://u:p@localhost:5432/db"
@@ -37,6 +37,33 @@ def test_defaults() -> None:
 
     assert settings.access_token_expire_minutes == 60
     assert settings.cors_origins == ["http://localhost:4200"]
+
+
+def test_token_lifetime_and_llm_timeout_have_upper_bounds() -> None:
+    """A typo must fail at startup: a near-immortal token has no revocation list behind it, and
+    an unbounded provider timeout would let one stuck call drain the whole worker pool."""
+    assert make_settings(access_token_expire_minutes=1440)
+    assert make_settings(llm_timeout_seconds=120)
+    with pytest.raises(ValidationError):
+        make_settings(access_token_expire_minutes=1441)
+    with pytest.raises(ValidationError):
+        make_settings(llm_timeout_seconds=121)
+
+
+def test_wildcard_cors_is_rejected_in_production_only() -> None:
+    assert make_settings(cors_origins="*", environment="development")
+    with pytest.raises(ValidationError):
+        make_settings(cors_origins="*", environment="production")
+    with pytest.raises(ValidationError):
+        make_settings(cors_origins="https://app.vercel.app, *", environment="production")
+
+
+def test_max_text_chars_cannot_exceed_the_request_body_cap() -> None:
+    """Otherwise the schema would reject a text the app itself allows, and as a generic
+    `validation_error` instead of the translated `text_too_long` (see MAX_REQUEST_TEXT_CHARS)."""
+    assert make_settings(max_text_chars=MAX_REQUEST_TEXT_CHARS)
+    with pytest.raises(ValidationError):
+        make_settings(max_text_chars=MAX_REQUEST_TEXT_CHARS + 1)
 
 
 @pytest.mark.parametrize(

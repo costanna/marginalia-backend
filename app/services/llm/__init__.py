@@ -27,3 +27,14 @@ def get_llm_client() -> LLMClient:
             max_tokens=settings.llm_max_tokens,
         )
     return FakeLLMClient()
+
+
+async def aclose_llm_client() -> None:
+    """Best-effort shutdown hook for the process-cached client above (it holds a pool).
+
+    Clients without an `aclose` (the fake, test doubles) are simply skipped; constructing the
+    client here only builds objects, it never touches the network.
+    """
+    aclose = getattr(get_llm_client(), "aclose", None)
+    if callable(aclose):
+        await aclose()

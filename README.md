@@ -112,9 +112,13 @@ mypy
 pytest --cov=app.services --cov-fail-under=80
 ```
 
-Tests never call the real LLM and never depend on your `.env`. They run against a **real PostgreSQL** (a separate `<db>_test` database, created automatically and
-built with the real Alembic migrations). The same checks run in CI on every pull request and on pushes
-to `main`.
+Tests never call the real LLM and never depend on your `.env`. Two kinds of test live side by side:
+the **pure** ones (validators, prompts, statistics, config, clients) need nothing but the interpreter,
+and the **database** ones run against a **real PostgreSQL** (a separate `<db>_test` database, created
+automatically and built with the real Alembic migrations). With no server running, the latter are
+*skipped* and say which command starts it, so `pytest` stays usable in the edit-run-fix loop; in CI a
+missing database fails the job rather than letting it go green. The same checks run in CI on every
+pull request and on pushes to `main`.
 
 ### Database migrations
 

@@ -55,6 +55,33 @@ async def call(client: AnthropicClient, text: str = "Hello world.") -> dict[str,
     )
 
 
+async def test_aclose_closes_an_owned_sdk_client() -> None:
+    client = AnthropicClient(
+        api_key="unused", model="some-model", timeout_seconds=30, max_tokens=1234
+    )
+
+    await client.aclose()
+
+    assert client._client.is_closed()
+
+
+async def test_aclose_leaves_an_injected_sdk_client_alone() -> None:
+    closed = False
+
+    async def close() -> None:
+        nonlocal closed
+        closed = True
+
+    stub = cast(anthropic.AsyncAnthropic, SimpleNamespace(messages=StubMessages(), close=close))
+    client = AnthropicClient(
+        api_key="unused", model="some-model", timeout_seconds=30, max_tokens=1234, client=stub
+    )
+
+    await client.aclose()
+
+    assert not closed
+
+
 async def test_returns_the_parsed_json() -> None:
     client = make_client(StubMessages(reply(text_block(json.dumps(ANSWER)))))
 

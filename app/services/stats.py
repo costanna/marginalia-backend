@@ -67,7 +67,9 @@ async def overview(session: AsyncSession, user_id: uuid.UUID) -> dict[str, objec
     current_level = await session.scalar(
         select(AnalyzedText.cefr_level)
         .where(AnalyzedText.user_id == user_id)
-        .order_by(AnalyzedText.created_at.desc())
+        # id breaks ties: two texts analysed in the same instant must still pick the newest one,
+        # like every other newest-first query (see texts.py and me.py).
+        .order_by(AnalyzedText.created_at.desc(), AnalyzedText.id.desc())
         .limit(1)
     )
 

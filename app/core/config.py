@@ -6,6 +6,14 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 PLACEHOLDER_SECRET_PREFIX = "change-me"
 
+# Hard cap on the RAW request body, checked by Pydantic before anything else runs, so an absurdly
+# large payload never reaches the cleaner or the LLM. It is deliberately separate from
+# `Settings.max_text_chars` (the real, configurable limit, reported as `text_too_long` after
+# cleaning), and `max_text_chars` is constrained to stay below it: otherwise a text that the app
+# considers valid could be rejected earlier by the schema as a generic `validation_error` instead
+# of the translated `text_too_long` with its `details`.
+MAX_REQUEST_TEXT_CHARS = 20_000
+
 
 class Settings(BaseSettings):
     """Application settings, read from environment variables (and a local .env file)."""
@@ -16,7 +24,10 @@ class Settings(BaseSettings):
     environment: Literal["development", "test", "production"] = "development"
     database_url: str
     secret_key: str = Field(min_length=32)
-    access_token_expire_minutes: int = Field(default=60, gt=0)
+    # le=1440: a token is a bearer secret with no revocation list, so its lifetime is the whole
+    # security boundary — a day is already generous for a learning app, and a typo like 999999
+    # must fail at startup instead of minting near-immortal sessions.
+    access_token_expire_minutes: int = Field(default=60, gt=0, le=1440)
     # NoDecode: read the raw string ("a,b") instead of expecting JSON, then split it below.
     cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:4200"]
 
@@ -28,11 +39,15 @@ class Settings(BaseSettings):
     llm_base_url: str = ""
     llm_api_key: str = ""
     llm_model: str = ""
-    llm_timeout_seconds: float = Field(default=30, gt=0)
+    # le=120: one hung provider call holds a worker; two minutes is already far beyond a healthy
+    # analysis, and an unbounded timeout would let a stuck provider drain the whole pool.
+    llm_timeout_seconds: float = Field(default=30, gt=0, le=120)
     # Upper bound for one analysis response; keeps a runaway generation from costing too much.
     llm_max_tokens: int = Field(default=4096, gt=0)
 
-    max_text_chars: int = Field(default=3000, gt=0)
+    # le=MAX_REQUEST_TEXT_CHARS: the body cap above must never be the one to reject a text this
+    # setting allows. Fails at startup, not mysteriously at request time.
+    max_text_chars: int = Field(default=3000, gt=0, le=MAX_REQUEST_TEXT_CHARS)
     daily_analysis_limit: int = Field(default=10, gt=0)
     daily_generation_limit: int = Field(default=5, gt=0)
     demo_daily_limit: int = Field(default=3, gt=0)
@@ -74,6 +89,13 @@ class Settings(BaseSettings):
             PLACEHOLDER_SECRET_PREFIX
         ):
             raise ValueError("SECRET_KEY must be replaced with a random value in production")
+        return self
+
+    @model_validator(mode="after")
+    def reject_wildcard_cors_in_production(self) -> "Settings":
+        # The API answers with Authorization headers: "*" would let any site read it.
+        if self.environment == "production" and "*" in self.cors_origins:
+            raise ValueError('CORS_ORIGINS must list the frontend exactly in production, never "*"')
         return self
 
     @model_validator(mode="after")

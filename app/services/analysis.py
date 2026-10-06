@@ -4,6 +4,7 @@ Everything here that does not need the database is a plain function so it can be
 one. Offsets are Unicode code points (Python string indices), end-exclusive.
 """
 
+import logging
 import re
 import unicodedata
 import uuid
@@ -32,6 +33,8 @@ from app.services.llm.base import (
     LLMUnavailableError,
 )
 from app.services.usage import refund_analysis, reserve_analysis, reserve_global_llm_call
+
+logger = logging.getLogger(__name__)
 
 MIN_TEXT_CHARS = 20
 LLM_ATTEMPTS = 2  # the first call plus a single retry when the answer is unusable
@@ -95,6 +98,21 @@ def validate_length(text: str, max_chars: int) -> None:
             status_code=422,
             details={"min": MIN_TEXT_CHARS, "max": max_chars, "length": length},
         )
+
+
+def prepare_text(text: str, *, max_chars: int) -> str:
+    """Clean the text and check its length, BEFORE anything expensive is committed to.
+
+    Validation must precede reserving quota: a rejected text should cost neither the learner's
+    daily allowance nor a unit of the shared provider capacity (the demo used to burn one of the
+    latter on every oversized request, and `text_too_long` was reported only after paying for it).
+
+    `clean_text` is idempotent, so calling this and then `analyze` is harmless — just a second
+    pass over a string already known to be within `max_chars`.
+    """
+    cleaned = clean_text(text)
+    validate_length(cleaned, max_chars)
+    return cleaned
 
 
 def _is_word_char(char: str) -> bool:
@@ -194,6 +212,17 @@ async def ask_llm(
                 message="The analysis service is temporarily unavailable.",
                 status_code=503,
             ) from None
+        except Exception as exc:
+            # A failure the provider client did not classify (an SDK bug, an unexpected
+            # transport wrapper, ...): the call still failed, so the client gets the honest
+            # "try again later" code instead of a blind 500, and the traceback stays in the
+            # server logs (never the exception text: it could hold the learner's words).
+            logger.exception("LLM call failed unexpectedly")
+            raise AppError(
+                code="llm_unavailable",
+                message="The analysis service is temporarily unavailable.",
+                status_code=503,
+            ) from exc
     raise AppError(
         code="llm_invalid_response",
         message="The analysis service returned an unusable answer.",
@@ -210,8 +239,7 @@ async def analyze(
     max_chars: int,
 ) -> AnalysisResult:
     """Analyse a text without touching the database (used by the demo and by saving)."""
-    cleaned = clean_text(text)
-    validate_length(cleaned, max_chars)
+    cleaned = prepare_text(text, max_chars=max_chars)
     answer = await ask_llm(client, text=cleaned, ui_language=ui_language, target_level=target_level)
     corrections = locate_corrections(cleaned, answer.corrections)
     return AnalysisResult(
@@ -242,8 +270,7 @@ async def analyze_and_save(
     per-user reservation is refunded if anything fails afterwards, including the shared daily
     cap being reached (in which case the LLM was never called, so nothing else to refund).
     """
-    cleaned = clean_text(text)
-    validate_length(cleaned, max_chars)
+    cleaned = prepare_text(text, max_chars=max_chars)
 
     user_id: uuid.UUID = user.id
     target_level = user.target_level

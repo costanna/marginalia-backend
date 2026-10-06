@@ -4,7 +4,7 @@ from app.api.v1.deps import LLMClientDep, SessionDep, SettingsDep
 from app.core.config import get_settings
 from app.core.rate_limit import limiter
 from app.schemas.texts import CorrectionBase, DemoAnalysisResponse, DemoAnalyzeRequest
-from app.services.analysis import analyze
+from app.services.analysis import analyze, prepare_text
 from app.services.usage import reserve_global_llm_call
 
 router = APIRouter(prefix="/demo", tags=["demo"])
@@ -22,10 +22,13 @@ async def demo_analyze(
     session: SessionDep,
 ) -> DemoAnalysisResponse:
     """Try the corrector without an account. Nothing is saved."""
+    # Validated BEFORE reserving: an oversized or too-short demo text must not consume a unit of
+    # the shared daily capacity, since no provider call is ever made for it.
+    cleaned = prepare_text(payload.text, max_chars=settings.max_text_chars)
     await reserve_global_llm_call(session, settings.daily_global_llm_limit)
     result = await analyze(
         client,
-        text=payload.text,
+        text=cleaned,
         ui_language=payload.ui_language,
         target_level=None,
         max_chars=settings.max_text_chars,

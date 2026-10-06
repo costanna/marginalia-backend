@@ -6,6 +6,7 @@ again (see `generate_or_reuse`). Answering one (`attempt`) marks it `done`, whic
 next call generate a fresh batch.
 """
 
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -25,6 +26,8 @@ from app.services.llm.base import (
     RuleFailure,
 )
 from app.services.usage import refund_generation, reserve_generation, reserve_global_llm_call
+
+logger = logging.getLogger(__name__)
 
 # How many rules to build exercises for, and how many of the user's own mistakes to show the
 # model as grounding for each (spec: "las 3 reglas más falladas").
@@ -115,6 +118,15 @@ async def _ask_llm_for_exercises(
                 message="The exercise generator is temporarily unavailable.",
                 status_code=503,
             ) from None
+        except Exception as exc:
+            # Same contract as ask_llm in analysis.py: an unclassified client failure is still
+            # a failed generation, answered 503 with the traceback kept server-side.
+            logger.exception("Exercise generation failed unexpectedly")
+            raise AppError(
+                code="llm_unavailable",
+                message="The exercise generator is temporarily unavailable.",
+                status_code=503,
+            ) from exc
     raise AppError(
         code="llm_invalid_response",
         message="The exercise generator returned an unusable answer.",

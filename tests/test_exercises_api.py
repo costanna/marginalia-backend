@@ -158,6 +158,24 @@ async def test_list_matches_what_generate_returned(client: AsyncClient) -> None:
     assert [item["id"] for item in listed] == [item["id"] for item in generated]
 
 
+async def test_list_respects_its_upper_bound(client: AsyncClient) -> None:
+    headers = await register(client)
+    await analyze(client, headers)
+    generated = await generate_exercises(client, headers)
+    assert len(generated) > 1
+
+    listed = (await client.get(f"{EXERCISES}?limit=1", headers=headers)).json()
+
+    assert [item["id"] for item in listed] == [item["id"] for item in generated[:1]]
+
+
+async def test_list_rejects_an_out_of_range_limit(client: AsyncClient) -> None:
+    headers = await register(client)
+
+    assert (await client.get(f"{EXERCISES}?limit=0", headers=headers)).status_code == 422
+    assert (await client.get(f"{EXERCISES}?limit=501", headers=headers)).status_code == 422
+
+
 async def test_the_status_filter_separates_pending_from_done(client: AsyncClient) -> None:
     headers = await register(client)
     await analyze(client, headers)

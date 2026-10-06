@@ -239,11 +239,6 @@ class Exercise(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    # The text that prompted it, if any single one did; kept only to let the UI link back to it.
-    # ON DELETE SET NULL: deleting that text must not delete the exercise built from it.
-    source_text_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("texts.id", ondelete="SET NULL"), default=None
-    )
     rule_tag: Mapped[RuleTag] = mapped_column(_text_enum(RuleTag, "exercise_rule_tag", length=32))
     type: Mapped[ExerciseType] = mapped_column(_text_enum(ExerciseType, "exercise_type"))
     prompt: Mapped[str] = mapped_column(Text)
@@ -270,7 +265,10 @@ class ExerciseAttempt(Base):
     )
     # Denormalised on purpose: kept even if the exercise itself were ever removed some other way,
     # and it is what makes "delete my account" a single, simple filter.
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # Indexed like every other user_id lookup column: /me/export filters on it.
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
     user_answer: Mapped[str] = mapped_column(Text)
     is_correct: Mapped[bool] = mapped_column(Boolean)
     attempted_at: Mapped[datetime] = mapped_column(

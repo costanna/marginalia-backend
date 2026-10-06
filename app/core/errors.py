@@ -3,6 +3,7 @@
 The backend never translates messages: the frontend maps `code` to a translated text.
 """
 
+import logging
 from collections.abc import Mapping
 from typing import Any
 
@@ -12,6 +13,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from starlette.exceptions import HTTPException as StarletteHTTPException
+
+logger = logging.getLogger(__name__)
 
 
 class AppError(Exception):
@@ -65,14 +68,19 @@ async def _handle_validation_error(_: Request, exc: Exception) -> JSONResponse:
     return _error_response(422, "validation_error", "Invalid request data.", {"errors": errors})
 
 
-async def _handle_http_exception(_: Request, exc: Exception) -> JSONResponse:
-    assert isinstance(exc, StarletteHTTPException)
+async def _handle_http_exception(request: Request, exc: Exception) -> JSONResponse:
+    if not isinstance(exc, StarletteHTTPException):
+        # A wrong registration must not 500 inside the error handler: fall back to the
+        # generic 500 path (an assert would also vanish under `python -O`).
+        return await _handle_unexpected(request, exc)
     code = _HTTP_STATUS_CODES.get(exc.status_code, "http_error")
     return _error_response(exc.status_code, code, str(exc.detail), headers=exc.headers)
 
 
-async def _handle_rate_limit(_: Request, exc: Exception) -> JSONResponse:
-    assert isinstance(exc, RateLimitExceeded) and exc.limit is not None
+async def _handle_rate_limit(request: Request, exc: Exception) -> JSONResponse:
+    if not isinstance(exc, RateLimitExceeded) or exc.limit is None:
+        # Same reasoning as above: never 500 inside an error handler.
+        return await _handle_unexpected(request, exc)
     item = exc.limit.limit
     period = item.GRANULARITY.name
     # A per-day limit is a quota the user can act on ("sign up for more"); anything shorter
@@ -83,9 +91,28 @@ async def _handle_rate_limit(_: Request, exc: Exception) -> JSONResponse:
     )
 
 
+async def _handle_unexpected(request: Request, exc: Exception) -> JSONResponse:
+    """Keep an exception nobody caught inside the format this module documents.
+
+    Without a handler, Starlette's own default answers `text/plain "Internal Server Error"`, so a
+    client written against `{"error": {...}}` would find no `code` to show. The traceback is not
+    duplicated here: Starlette re-raises once the response is sent (see
+    `starlette/middleware/errors.py`), so the server logs it with its own context. What the server
+    log does NOT say is which path exploded, so only the route and the exception type are added —
+    never `str(exc)`, which could carry a connection string or a file path to the client.
+    """
+    logger.error("Unhandled %s on %s %s", type(exc).__name__, request.method, request.url.path)
+    return _error_response(500, "internal_error", "An unexpected error occurred.")
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(AppError, _handle_app_error)
     # RateLimitExceeded is an HTTPException subclass: its own handler must be registered too.
     app.add_exception_handler(RateLimitExceeded, _handle_rate_limit)
     app.add_exception_handler(RequestValidationError, _handle_validation_error)
     app.add_exception_handler(StarletteHTTPException, _handle_http_exception)
+    # Keyed by STATUS CODE: Starlette routes 500 to ServerErrorMiddleware, which runs before the
+    # others and so is the only one that can catch an exception raised outside a route (a
+    # dependency, middleware, ...) or one that nobody handled. It must be registered before the
+    # first request, because that is when the middleware stack is built from this dict.
+    app.add_exception_handler(500, _handle_unexpected)

@@ -82,7 +82,13 @@ class OpenAICompatibleClient:
         self._max_tokens = max_tokens
         self._max_retries = max_retries
         self._sleep = sleep
+        self._owns_http = http_client is None
         self._http = http_client or httpx.AsyncClient(timeout=timeout_seconds)
+
+    async def aclose(self) -> None:
+        """Release the connection pool. An injected client belongs to whoever built it (tests)."""
+        if self._owns_http:
+            await self._http.aclose()
 
     async def analyze_text(
         self,
