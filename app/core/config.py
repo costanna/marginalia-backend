@@ -61,6 +61,14 @@ class Settings(BaseSettings):
     # Turns on GET /api/v1/diagnostics/client-ip (off by default). Meant to be enabled for a few
     # minutes after a deployment to see which headers the host's proxies really send.
     enable_diagnostics: bool = False
+    # Keep-awake estilo woke-dyno para el plan gratuito de Render (duerme tras
+    # ~15 min sin tráfico entrante). Un hilo pide la URL pública cada N min.
+    # Apagado por defecto: actívalo en producción con la URL pública real.
+    # Despierto 24/7 gasta ~720 h/mes de las 750 h gratuitas (vale para un
+    # solo servicio).
+    keep_awake_enabled: bool = False
+    keep_awake_url: str = ""
+    keep_awake_minutes: int = 10
 
     @field_validator("database_url")
     @classmethod

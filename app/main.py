@@ -8,11 +8,16 @@ from app.api.v1 import auth, demo, diagnostics, exercises, health, me, stats, te
 from app.core.config import get_settings
 from app.core.errors import register_exception_handlers
 from app.core.rate_limit import limiter
+from app.services.keep_awake import keep_awake_configured, start_keep_awake
 from app.services.llm import aclose_llm_client
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    settings = get_settings()
+    # Keep-awake estilo woke-dyno (solo si keep_awake_enabled + keep_awake_url).
+    if keep_awake_configured(settings.keep_awake_enabled, settings.keep_awake_url):
+        start_keep_awake(settings.keep_awake_url, settings.keep_awake_minutes)
     yield
     # The cached LLM client holds an httpx pool; without this it warns and leaks per deploy.
     await aclose_llm_client()

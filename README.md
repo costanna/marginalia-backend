@@ -282,6 +282,13 @@ Render panel and never anywhere else.
 cron-job.org) avoids the one-minute wake-up. One service running all month uses about 744 of the
 750 free hours, so it fits, but confirm the current limits first.
 
+**Built-in keep-awake (woke-dyno style, no extra services).** With `KEEP_AWAKE_ENABLED=true` and
+`KEEP_AWAKE_URL` set to the public URL + `/api/v1/health`, an internal thread pings it every
+`KEEP_AWAKE_MINUTES` (10) minutes so the free plan never sleeps: same trick as Node's `woke-dyno`
+package, with no extra services or dependencies (stdlib only, `app/services/keep_awake.py`). Off by
+default locally and in tests. Same hours warning as above: ~720 h/month, fine for a single service —
+with more Render services sharing the 750 free hours, switch it off.
+
 ## Environment variables
 
 See [.env.example](.env.example) for the full list (values there are placeholders, never real secrets).
