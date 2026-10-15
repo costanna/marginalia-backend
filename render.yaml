@@ -50,7 +50,7 @@ services:
       # para que el plan gratuito no se duerma (~15 min sin tráfico). Solo
       # la URL es secreta de este despliegue: se rellena a mano.
       - key: KEEP_AWAKE_ENABLED
-        value: "true"
+        value: "false"
       - key: KEEP_AWAKE_URL
         sync: false
       - key: KEEP_AWAKE_MINUTES
