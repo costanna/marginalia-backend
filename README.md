@@ -278,16 +278,17 @@ Render panel and never anywhere else.
    CDN), and the socket peer is NOT reliable either: uvicorn overwrites it with the first address of
    the header, which the visitor controls.
 
-**Keeping it awake (optional).** An external ping to `/api/v1/health` every few minutes (UptimeRobot,
-cron-job.org) avoids the one-minute wake-up. One service running all month uses about 744 of the
-750 free hours, so it fits, but confirm the current limits first.
+**Sleeping when idle (on purpose).** The free plans have limited hours, so the API and the Neon
+database are meant to sleep when nobody is using the app. The first request after a nap takes about
+a minute (the frontend shows a "waking up the server" banner meanwhile); that is the price of not
+paying. Do **not** set up external pingers (UptimeRobot, cron-job.org, scheduled GitHub Actions):
+an always-awake service burns through the monthly hours and takes the app down. It already happened
+with another project of mine on the same Neon account, whose compute stayed on day and night.
 
-**Built-in keep-awake (woke-dyno style, no extra services).** With `KEEP_AWAKE_ENABLED=true` and
-`KEEP_AWAKE_URL` set to the public URL + `/api/v1/health`, an internal thread pings it every
-`KEEP_AWAKE_MINUTES` (10) minutes so the free plan never sleeps: same trick as Node's `woke-dyno`
-package, with no extra services or dependencies (stdlib only, `app/services/keep_awake.py`). Off by
-default locally and in tests. Same hours warning as above: ~720 h/month, fine for a single service —
-with more Render services sharing the 750 free hours, switch it off.
+**Built-in keep-awake (off, and it should stay off).** The code includes a woke-dyno-style thread
+(`app/services/keep_awake.py`) that pings `KEEP_AWAKE_URL` every `KEEP_AWAKE_MINUTES` minutes when
+`KEEP_AWAKE_ENABLED=true`. It is disabled in `render.yaml`, locally and in tests. Turning it on keeps
+the service awake 24/7 (~720 of the 750 free Render hours per month), so only do it on a paid plan.
 
 ## Environment variables
 
